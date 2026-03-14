@@ -27,6 +27,9 @@ pub struct Config {
 
     #[serde(default = "default_theme")]
     pub theme: String,
+
+    #[serde(default)]
+    pub default_device: Option<String>,
 }
 
 fn default_model() -> String {
@@ -63,6 +66,7 @@ impl Default for Config {
             prefer: default_prefer(),
             auto_approve: default_auto_approve(),
             theme: default_theme(),
+            default_device: None,
         }
     }
 }

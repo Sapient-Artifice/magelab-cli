@@ -44,6 +44,10 @@ struct Cli {
     #[arg(long)]
     yolo: bool,
 
+    /// Target a specific desktop device by name (implies --remote)
+    #[arg(long)]
+    device: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -76,7 +80,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
-    let mode = ConnectionMode::from_flags(cli.local, cli.remote);
+    // --device implies --remote
+    let mode = if cli.device.is_some() {
+        ConnectionMode::Remote
+    } else {
+        ConnectionMode::from_flags(cli.local, cli.remote)
+    };
     let model = cli.model.clone().unwrap_or(config.default_model.clone());
 
     // Handle subcommands (all require remote/API key)
@@ -87,7 +96,7 @@ async fn main() -> Result<()> {
     // Determine connection mode
     let resolved = match &mode {
         ConnectionMode::Local => detect::ResolvedConnection::Local,
-        ConnectionMode::Remote => detect::ResolvedConnection::RemoteRest,
+        ConnectionMode::Remote => resolve_remote_mode(&config, cli.device.as_deref()).await?,
         ConnectionMode::Auto => resolve_auto_mode(&config).await?,
     };
 
@@ -154,9 +163,80 @@ async fn resolve_auto_mode(config: &Config) -> Result<detect::ResolvedConnection
         return Ok(detect::ResolvedConnection::RemoteRest);
     }
 
-    // 5. No auth at all → prompt login
-    println!("No local backend, no credentials. Run `magelab login` to authenticate,");
-    println!("or set an API key in ~/.config/magelab/cli.toml");
+    // 5. No auth at all → offer to login
+    println!("No local backend found and no credentials configured.\n");
+    println!("  1) Log in with Google   (magelab login)");
+    println!("  2) Enter an API key     (get one at magelab.ai/dashboard)\n");
+    print!("Choose [1/2]: ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+
+    let mut choice = String::new();
+    std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut choice)?;
+
+    match choice.trim() {
+        "1" | "" => {
+            auth::oauth::login(&config.gateway_url).await?;
+            // After login, retry JWT path
+            let creds = auth::credentials::Credentials::load().unwrap_or_default();
+            if let Some(_jwt) = creds.access_token {
+                return Ok(detect::ResolvedConnection::RemoteRest);
+            }
+            anyhow::bail!("Login completed but no credentials found. Try again.")
+        }
+        "2" => {
+            anyhow::bail!("Run: magelab config  — then add api_key to ~/.config/magelab/cli.toml")
+        }
+        _ => {
+            anyhow::bail!("No authentication configured")
+        }
+    }
+}
+
+/// Resolve --remote: try relay (JWT + device) first, fall back to REST
+async fn resolve_remote_mode(
+    config: &Config,
+    device: Option<&str>,
+) -> Result<detect::ResolvedConnection> {
+    // Try JWT auth for relay
+    let creds = auth::credentials::Credentials::load().unwrap_or_default();
+    if let Some(jwt) = try_get_valid_jwt(&creds, &config.gateway_url).await {
+        // Check for devices
+        match detect::discover_devices(&config.gateway_url, &jwt).await {
+            Ok(devices) if !devices.is_empty() => {
+                let target = device
+                    .or(config.default_device.as_deref())
+                    .unwrap_or(&devices[0]);
+
+                if let Some(d) = device {
+                    if !devices.iter().any(|dev| dev == d) {
+                        render::stream::print_error(&format!(
+                            "Device \"{}\" is not online. Available: {}",
+                            d,
+                            devices.join(", ")
+                        ));
+                        anyhow::bail!("Device not found");
+                    }
+                }
+
+                let _ = target; // used for future device targeting
+                return Ok(detect::ResolvedConnection::RemoteRelay { jwt });
+            }
+            Ok(_) => {
+                // No devices — fall through to REST
+            }
+            Err(_) => {
+                // Device check failed — fall through to REST
+            }
+        }
+    }
+
+    // Fall back to REST/SSE (chat only)
+    if config.api_key().is_some() {
+        return Ok(detect::ResolvedConnection::RemoteRest);
+    }
+
+    // No auth at all
+    println!("Run `magelab login` to authenticate, or set api_key in cli.toml");
     anyhow::bail!("No authentication configured")
 }
 
@@ -234,6 +314,8 @@ async fn run_local_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> {
     let approval = ApprovalPolicy::new(config.auto_approve.clone(), cli.yolo);
     let display_model = backend_model.as_deref().unwrap_or(model);
 
+    println!("\u{1f5a5} Connected to local backend");
+
     // One-shot mode
     if let Some(prompt) = &cli.prompt {
         let stdin_content = read_stdin_if_piped();
@@ -249,11 +331,7 @@ async fn run_local_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> {
     }
 
     // REPL mode
-    println!(
-        "MageLab v{} (local mode, {})",
-        env!("CARGO_PKG_VERSION"),
-        display_model
-    );
+    println!("MageLab v{} ({})", env!("CARGO_PKG_VERSION"), display_model);
     println!("Type /help for commands, Ctrl+D to exit.\n");
 
     let mut rl = rustyline::DefaultEditor::new()?;
@@ -434,6 +512,8 @@ async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> R
     let backend_model = drain_until_runtime_config(&mut stream).await;
     let display_model = backend_model.as_deref().unwrap_or(model);
 
+    println!("\u{26a1} Connected via relay (full tools)");
+
     let approval = ApprovalPolicy::new(config.auto_approve.clone(), cli.yolo);
 
     // One-shot mode
@@ -450,11 +530,7 @@ async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> R
     }
 
     // REPL mode
-    println!(
-        "MageLab v{} (relay mode, {})",
-        env!("CARGO_PKG_VERSION"),
-        display_model
-    );
+    println!("MageLab v{} ({})", env!("CARGO_PKG_VERSION"), display_model);
     println!("Type /help for commands, Ctrl+D to exit.\n");
 
     let mut rl = rustyline::DefaultEditor::new()?;
@@ -509,6 +585,8 @@ async fn run_remote_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> 
     let api_key = config.api_key().unwrap();
     let client = RemoteClient::new(&config.gateway_url, &api_key);
 
+    println!("\u{2601} Connected to gateway (chat only)");
+
     // One-shot mode
     if let Some(prompt) = &cli.prompt {
         let stdin_content = read_stdin_if_piped();
@@ -525,11 +603,7 @@ async fn run_remote_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> 
     }
 
     // REPL mode (remote — chat only, no tools)
-    println!(
-        "MageLab v{} (remote mode, {})",
-        env!("CARGO_PKG_VERSION"),
-        model
-    );
+    println!("MageLab v{} ({})", env!("CARGO_PKG_VERSION"), model);
     println!("Type /help for commands, Ctrl+D to exit.\n");
 
     let mut rl = rustyline::DefaultEditor::new()?;

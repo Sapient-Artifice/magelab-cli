@@ -51,3 +51,13 @@ fn test_conflicting_flags() {
         .assert()
         .success();
 }
+
+#[test]
+fn test_device_flag_shows_in_help() {
+    Command::cargo_bin("magelab")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--device"));
+}

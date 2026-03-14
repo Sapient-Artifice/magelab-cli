@@ -14,6 +14,8 @@ pub struct Credentials {
     pub expires_at: Option<i64>,
     #[serde(default)]
     pub user_id: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 #[allow(dead_code)]

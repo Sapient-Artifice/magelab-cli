@@ -5,101 +5,267 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use std::net::TcpListener;
+use std::str::FromStr;
+use workos::sso::{AuthorizationCode, ClientId};
+use workos::user_management::{
+    AuthenticateWithCode, AuthenticateWithCodeParams, AuthenticateWithMagicAuth,
+    AuthenticateWithMagicAuthParams, AuthenticateWithRefreshToken,
+    AuthenticateWithRefreshTokenParams, CodeChallenge, ConnectionSelector, CreateMagicAuth,
+    CreateMagicAuthParams, GetAuthorizationUrl, GetAuthorizationUrlParams, OauthProvider, Provider,
+};
+use workos::{ApiKey, WorkOs};
 
 use super::credentials::Credentials;
 
-/// Supabase auth base URL
-const AUTH_URL: &str = "https://auth.magelab.ai/auth/v1";
+/// WorkOS Client ID (shared with web frontend)
+const DEFAULT_CLIENT_ID: &str = "client_01KKJ9GJKHDMW63A3RCV56KVZ6";
 
-/// Run the full OAuth login flow:
-/// 1. Generate PKCE verifier + challenge
-/// 2. Start loopback HTTP server
-/// 3. Open browser to Supabase OAuth
-/// 4. Handle callback with auth code
-/// 5. Exchange code for tokens
-/// 6. Save credentials
-pub async fn login(_gateway_url: &str) -> Result<Credentials> {
-    // Generate PKCE
+/// Fixed loopback port (must match WorkOS redirect URI config)
+const LOOPBACK_PORT: u16 = 19872;
+
+/// URL for new account signup
+const SIGNUP_URL: &str = "https://magelab.ai/signup";
+
+/// Login method selection
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginMethod {
+    /// Google OAuth via browser
+    Google,
+    /// Magic auth code via email
+    MagicAuth,
+}
+
+impl Default for LoginMethod {
+    fn default() -> Self {
+        Self::Google
+    }
+}
+
+impl FromStr for LoginMethod {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "google" => Ok(Self::Google),
+            "magic" | "email" | "magic-auth" => Ok(Self::MagicAuth),
+            _ => anyhow::bail!("Unknown login method '{}'. Use 'google' or 'magic'.", s),
+        }
+    }
+}
+
+/// Get WorkOS Client ID from env or default
+fn client_id() -> String {
+    std::env::var("WORKOS_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string())
+}
+
+/// Get WorkOS API Key from env (required for SDK calls)
+fn api_key() -> String {
+    std::env::var("WORKOS_API_KEY").unwrap_or_default()
+}
+
+/// Run the login flow using the default method (Google).
+pub async fn login(gateway_url: &str) -> Result<Credentials> {
+    login_with_method(gateway_url, &LoginMethod::default()).await
+}
+
+/// Run the login flow with a specific method.
+pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Result<Credentials> {
+    match method {
+        LoginMethod::Google => login_google(gateway_url).await,
+        LoginMethod::MagicAuth => login_magic_auth(gateway_url).await,
+    }
+}
+
+/// Magic Auth login flow
+async fn login_magic_auth(_gateway_url: &str) -> Result<Credentials> {
+    let key: ApiKey = api_key().into();
+    let workos = WorkOs::new(&key);
+    let cid: ClientId = client_id().into();
+
+    print!("Email: ");
+    std::io::stdout().flush()?;
+    let mut email = String::new();
+    std::io::stdin().lock().read_line(&mut email)?;
+    let email = email.trim();
+    if email.is_empty() {
+        anyhow::bail!("Email is required");
+    }
+
+    println!("Sending login code to {}...", email);
+    let create_params = CreateMagicAuthParams {
+        email,
+        invitation_token: None,
+    };
+
+    let magic_auth_result = workos
+        .user_management()
+        .create_magic_auth(&create_params)
+        .await;
+
+    if let Err(ref e) = magic_auth_result {
+        let err_str = format!("{:?}", e);
+        if err_str.contains("user_not_found") || err_str.contains("404") {
+            println!("\nNo MageLab account found for {}.", email);
+            println!("Create one at: {}", SIGNUP_URL);
+            println!("\nOr sign in with Google: magelab login --method google");
+            anyhow::bail!("Account not found");
+        }
+    }
+
+    magic_auth_result.map_err(|e| anyhow::anyhow!("Failed to send magic auth code: {:?}", e))?;
+
+    println!("Check your inbox for a login code.");
+    print!("Code: ");
+    std::io::stdout().flush()?;
+    let mut code_input = String::new();
+    std::io::stdin().lock().read_line(&mut code_input)?;
+    let code_input = code_input.trim().to_string();
+    if code_input.is_empty() {
+        anyhow::bail!("Code is required");
+    }
+
+    let magic_code: workos::user_management::MagicAuthCode = code_input.into();
+    let auth_params = AuthenticateWithMagicAuthParams {
+        client_id: &cid,
+        code: &magic_code,
+        email,
+        invitation_token: None,
+        ip_address: None,
+        user_agent: None,
+    };
+
+    let response = workos
+        .user_management()
+        .authenticate_with_magic_auth(&auth_params)
+        .await
+        .map_err(|e| {
+            let err_str = format!("{:?}", e);
+            if err_str.contains("user_not_found") || err_str.contains("404") {
+                anyhow::anyhow!(
+                    "No MageLab account found for {}.\nCreate one at: {}",
+                    email,
+                    SIGNUP_URL
+                )
+            } else {
+                anyhow::anyhow!("Magic auth failed: {:?}", e)
+            }
+        })?;
+
+    let expires_at = chrono::Utc::now().timestamp() + 3600;
+    let creds = Credentials {
+        access_token: Some(response.access_token.to_string()),
+        refresh_token: Some(response.refresh_token.to_string()),
+        expires_at: Some(expires_at),
+        user_id: Some(response.user.id.to_string()),
+        email: Some(response.user.email.clone()),
+    };
+
+    creds.save()?;
+    let path = Credentials::path()?;
+    println!("Logged in as {}!", response.user.email);
+    println!("Credentials saved to {}", path.display());
+    Ok(creds)
+}
+
+/// Google OAuth login flow via WorkOS AuthKit
+async fn login_google(_gateway_url: &str) -> Result<Credentials> {
+    let key: ApiKey = api_key().into();
+    let workos = WorkOs::new(&key);
+    let cid: ClientId = client_id().into();
+
     let verifier = generate_code_verifier();
     let challenge = generate_code_challenge(&verifier);
     let state = generate_state();
 
-    // Start loopback server on random port
-    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to start loopback server")?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
+        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
+    let redirect_uri = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
 
-    // Build authorize URL
-    let authorize_url = format!(
-        "{}/authorize?provider=google&code_challenge={}&code_challenge_method=S256&redirect_uri={}&response_type=code&state={}&flow_type=pkce",
-        AUTH_URL,
-        urlencoded(&challenge),
-        urlencoded(&redirect_uri),
-        urlencoded(&state),
-    );
+    let provider = Provider::Oauth(OauthProvider::GoogleOAuth);
+    let params = GetAuthorizationUrlParams {
+        client_id: &cid,
+        redirect_uri: &redirect_uri,
+        connection_selector: ConnectionSelector::Provider(&provider),
+        state: Some(&state),
+        code_challenge: Some(CodeChallenge::S256(&challenge)),
+        login_hint: None,
+        domain_hint: None,
+    };
+
+    let authorize_url = workos
+        .user_management()
+        .get_authorization_url(&params)
+        .context("Failed to build WorkOS authorization URL")?;
 
     println!("Opening browser for login...");
     println!("If browser doesn't open, visit:\n{}\n", authorize_url);
-    open::that(&authorize_url).ok();
+    open::that(authorize_url.as_str()).ok();
 
-    // Wait for callback
     println!("Waiting for authentication...");
     let (code, returned_state) = wait_for_callback(listener)?;
 
-    // Validate state
     if returned_state != state {
         anyhow::bail!("OAuth state mismatch — possible CSRF attack");
     }
 
-    // Exchange code for tokens
     println!("Exchanging authorization code...");
-    let creds = exchange_code(&code, &verifier, &redirect_uri).await?;
+    let auth_code: AuthorizationCode = code.into();
+    let auth_params = AuthenticateWithCodeParams {
+        client_id: &cid,
+        code: &auth_code,
+        code_verifier: Some(&verifier),
+        invitation_token: None,
+        ip_address: None,
+        user_agent: None,
+    };
 
-    // Save
+    let response = workos
+        .user_management()
+        .authenticate_with_code(&auth_params)
+        .await
+        .map_err(|e| anyhow::anyhow!("WorkOS authentication failed: {:?}", e))?;
+
+    let expires_at = chrono::Utc::now().timestamp() + 3600;
+    let creds = Credentials {
+        access_token: Some(response.access_token.to_string()),
+        refresh_token: Some(response.refresh_token.to_string()),
+        expires_at: Some(expires_at),
+        user_id: Some(response.user.id.to_string()),
+        email: Some(response.user.email.clone()),
+    };
+
     creds.save()?;
     let path = Credentials::path()?;
-    println!("Logged in! Credentials saved to {}", path.display());
-
+    println!("Logged in as {}!", response.user.email);
+    println!("Credentials saved to {}", path.display());
     Ok(creds)
 }
 
-/// Generate a cryptographically random PKCE code verifier (43-128 chars, URL-safe)
 fn generate_code_verifier() -> String {
     let mut rng = rand::thread_rng();
     let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Generate S256 code challenge from verifier
 fn generate_code_challenge(verifier: &str) -> String {
     let hash = Sha256::digest(verifier.as_bytes());
     URL_SAFE_NO_PAD.encode(hash)
 }
 
-/// Generate a random state parameter for CSRF protection
 fn generate_state() -> String {
     let mut rng = rand::thread_rng();
     let bytes: Vec<u8> = (0..16).map(|_| rng.gen()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// URL-encode a string
-fn urlencoded(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
-
-/// Wait for the OAuth callback on the loopback server
 fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
-    // Set a timeout so we don't wait forever
     listener.set_nonblocking(false)?;
-
     let (mut stream, _) = listener.accept().context("No callback received")?;
 
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
 
-    // Parse: GET /callback?code=...&state=... HTTP/1.1
     let path = request_line
         .split_whitespace()
         .nth(1)
@@ -120,103 +286,45 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
         .map(|(_, v)| v.to_string())
         .unwrap_or_default();
 
-    // Send success response
     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
 }
 
-/// Exchange authorization code for access + refresh tokens
-async fn exchange_code(code: &str, code_verifier: &str, redirect_uri: &str) -> Result<Credentials> {
-    let client = reqwest::Client::new();
-
-    let resp = client
-        .post(format!("{}/token?grant_type=authorization_code", AUTH_URL))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "code": code,
-            "code_verifier": code_verifier,
-            "redirect_uri": redirect_uri,
-        }))
-        .send()
-        .await
-        .context("Failed to exchange auth code")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Token exchange failed ({}): {}", status, body);
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .context("Failed to parse token response")?;
-
-    let access_token = body["access_token"]
-        .as_str()
-        .context("No access_token in response")?
-        .to_string();
-
-    let refresh_token = body["refresh_token"].as_str().map(String::from);
-
-    let expires_in = body["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-
-    let user_id = body["user"]["id"].as_str().map(String::from);
-
-    Ok(Credentials {
-        access_token: Some(access_token),
-        refresh_token,
-        expires_at: Some(expires_at),
-        user_id,
-    })
-}
-
-/// Refresh an expired access token using the refresh token
 #[allow(dead_code)]
-pub async fn refresh_token(refresh_token: &str) -> Result<Credentials> {
-    let client = reqwest::Client::new();
+pub async fn refresh_token(rt: &str) -> Result<Credentials> {
+    let key: ApiKey = api_key().into();
+    let workos = WorkOs::new(&key);
+    let cid: ClientId = client_id().into();
+    let refresh: workos::user_management::RefreshToken = rt.to_string().into();
 
-    let resp = client
-        .post(format!("{}/token?grant_type=refresh_token", AUTH_URL))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "refresh_token": refresh_token,
-        }))
-        .send()
+    let params = AuthenticateWithRefreshTokenParams {
+        client_id: &cid,
+        refresh_token: &refresh,
+        organization_id: None,
+        ip_address: None,
+        user_agent: None,
+    };
+
+    let response = workos
+        .user_management()
+        .authenticate_with_refresh_token(&params)
         .await
-        .context("Failed to refresh token")?;
+        .map_err(|e| anyhow::anyhow!("WorkOS token refresh failed: {:?}", e))?;
 
-    if !resp.status().is_success() {
-        anyhow::bail!("Token refresh failed — please run `magelab login` again");
-    }
-
-    let body: serde_json::Value = resp.json().await?;
-
-    let access_token = body["access_token"]
-        .as_str()
-        .context("No access_token in refresh response")?
-        .to_string();
-
-    let new_refresh = body["refresh_token"].as_str().map(String::from);
-    let expires_in = body["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-    let user_id = body["user"]["id"].as_str().map(String::from);
-
+    let expires_at = chrono::Utc::now().timestamp() + 3600;
     let creds = Credentials {
-        access_token: Some(access_token),
-        refresh_token: new_refresh,
+        access_token: Some(response.access_token.to_string()),
+        refresh_token: Some(response.refresh_token.to_string()),
         expires_at: Some(expires_at),
-        user_id,
+        user_id: Some(response.user.id.to_string()),
+        email: Some(response.user.email.clone()),
     };
     creds.save()?;
-
     Ok(creds)
 }
 
-/// Ensure we have a valid JWT — refresh if expired, login if no credentials
 #[allow(dead_code)]
 pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
     let creds = Credentials::load()?;
@@ -225,17 +333,13 @@ pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
         return Ok(creds.access_token.unwrap());
     }
 
-    // Try refresh
     if let Some(ref rt) = creds.refresh_token {
         match refresh_token(rt).await {
             Ok(new_creds) => return Ok(new_creds.access_token.unwrap()),
-            Err(_) => {
-                // Refresh failed — need full login
-            }
+            Err(_) => {}
         }
     }
 
-    // Need full login
     let new_creds = login(gateway_url).await?;
     Ok(new_creds.access_token.unwrap())
 }
