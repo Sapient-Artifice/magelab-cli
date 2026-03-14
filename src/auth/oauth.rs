@@ -27,18 +27,13 @@ const LOOPBACK_PORT: u16 = 19872;
 const SIGNUP_URL: &str = "https://magelab.ai/signup";
 
 /// Login method selection
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LoginMethod {
     /// Google OAuth via browser
+    #[default]
     Google,
     /// Magic auth code via email
     MagicAuth,
-}
-
-impl Default for LoginMethod {
-    fn default() -> Self {
-        Self::Google
-    }
 }
 
 impl FromStr for LoginMethod {
@@ -334,9 +329,8 @@ pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
     }
 
     if let Some(ref rt) = creds.refresh_token {
-        match refresh_token(rt).await {
-            Ok(new_creds) => return Ok(new_creds.access_token.unwrap()),
-            Err(_) => {}
+        if let Ok(new_creds) = refresh_token(rt).await {
+            return Ok(new_creds.access_token.unwrap());
         }
     }
 

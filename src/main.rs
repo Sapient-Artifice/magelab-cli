@@ -1103,11 +1103,12 @@ where
                     }
                 }
             }
-            IncomingMessage::BindResult { bound_device_id } => {
-                if let Some(d) = bound_device_id {
-                    println!("\u{26a1} Bound to {}", d);
-                }
+            IncomingMessage::BindResult {
+                bound_device_id: Some(d),
+            } => {
+                println!("\u{26a1} Bound to {}", d);
             }
+            IncomingMessage::BindResult { .. } => {}
             IncomingMessage::BrokerError { code, message } => {
                 render::stream::print_error(&format!("Broker error ({}): {}", code, message));
             }
