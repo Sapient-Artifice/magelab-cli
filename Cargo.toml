@@ -1,0 +1,45 @@
+[package]
+name = "magelab-cli"
+version = "0.1.0"
+edition = "2021"
+description = "MageLab CLI — LLM chat and agentic tool use from the terminal"
+license = "MIT"
+repository = "https://github.com/Sapient-Artifice/magelab-cli"
+readme = "README.md"
+keywords = ["ai", "cli", "llm", "chat"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "magelab"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+reqwest = { version = "0.12", features = ["json", "stream", "native-tls"] }
+rustyline = "15"
+termimad = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+crossterm = "0.28"
+dirs = "6"
+futures-util = "0.3"
+anyhow = "1"
+url = "2"
+open = "5"
+indicatif = "0.17"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+tokio-test = "0.4"
+mockall = "0.13"
+wiremock = "0.6"

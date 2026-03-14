@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: magelab-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: magelab-macos-aarch64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: magelab-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: magelab-linux-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: magelab-windows-x86_64.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: cp target/${{ matrix.target }}/release/magelab ${{ matrix.name }}
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: cp target/${{ matrix.target }}/release/magelab.exe ${{ matrix.name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  macos-universal:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - name: Download x86_64
+        uses: actions/download-artifact@v4
+        with:
+          name: magelab-macos-x86_64
+      - name: Download aarch64
+        uses: actions/download-artifact@v4
+        with:
+          name: magelab-macos-aarch64
+
+      - name: Create universal binary
+        run: |
+          chmod +x magelab-macos-x86_64 magelab-macos-aarch64
+          lipo -create -output magelab-macos-universal magelab-macos-x86_64 magelab-macos-aarch64
+          chmod +x magelab-macos-universal
+
+      - name: Upload universal binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: magelab-macos-universal
+          path: magelab-macos-universal
+
+  release:
+    needs: [build, macos-universal]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            for file in "$dir"*; do
+              sha256sum "$file" >> checksums.txt
+            done
+          done
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/magelab-macos-universal/magelab-macos-universal
+            artifacts/magelab-macos-x86_64/magelab-macos-x86_64
+            artifacts/magelab-macos-aarch64/magelab-macos-aarch64
+            artifacts/magelab-linux-x86_64/magelab-linux-x86_64
+            artifacts/magelab-linux-aarch64/magelab-linux-aarch64
+            artifacts/magelab-windows-x86_64.exe/magelab-windows-x86_64.exe
+            artifacts/checksums.txt
