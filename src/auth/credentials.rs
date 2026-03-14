@@ -2,6 +2,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+const KEYCHAIN_SERVICE: &str = "magelab-cli";
+const KEYCHAIN_ACCOUNT: &str = "default";
+
 #[allow(dead_code)]
 /// Stored authentication credentials
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -26,8 +29,18 @@ impl Credentials {
         Ok(base.join("magelab").join("credentials.json"))
     }
 
-    /// Load credentials from disk, returning default if missing
+    /// Load credentials — try keychain first, then file fallback
     pub fn load() -> Result<Self> {
+        // Try keychain
+        if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+            if let Ok(json) = entry.get_password() {
+                if let Ok(creds) = serde_json::from_str::<Credentials>(&json) {
+                    return Ok(creds);
+                }
+            }
+        }
+
+        // File fallback
         let path = Self::path()?;
         if !path.exists() {
             return Ok(Self::default());
@@ -39,18 +52,42 @@ impl Credentials {
         Ok(creds)
     }
 
-    /// Save credentials to disk
+    /// Save credentials — try keychain first, then file fallback
     pub fn save(&self) -> Result<()> {
+        let json = serde_json::to_string(self)?;
+
+        // Try keychain
+        if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+            if entry.set_password(&json).is_ok() {
+                return Ok(());
+            }
+        }
+
+        // File fallback
+        eprintln!("Warning: No system keychain available — storing tokens in credentials file");
         let path = Self::path()?;
         let dir = path.parent().context("Invalid credentials path")?;
         std::fs::create_dir_all(dir)?;
-        let contents = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        std::fs::write(&path, &json)?;
+
+        // Set file permissions to 0600 on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
+
         Ok(())
     }
 
-    /// Clear stored credentials
+    /// Clear stored credentials from both keychain and file
     pub fn clear() -> Result<()> {
+        // Try keychain
+        if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+            entry.delete_credential().ok();
+        }
+
+        // File
         let path = Self::path()?;
         if path.exists() {
             std::fs::remove_file(&path)?;
