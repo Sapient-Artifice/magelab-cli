@@ -528,11 +528,26 @@ async fn run_local_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> Result<()> {
-    // Get a ws-ticket (single-use, 45s TTL)
+/// Connect to relay WebSocket: get ticket, connect, fetch runtime config.
+/// Returns (sink, stream, backend_model).
+async fn connect_relay(
+    config: &Config,
+    jwt: &str,
+) -> Result<(
+    futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        Message,
+    >,
+    futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
+    Option<String>,
+)> {
     let ticket = detect::get_ws_ticket(&config.gateway_url, jwt).await?;
-
-    // Build relay WebSocket URL
     let gateway_ws = config
         .gateway_url
         .replace("https://", "wss://")
@@ -543,16 +558,23 @@ async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> R
         ticket
     );
 
-    // Connect via relay — same protocol as local mode
     let (ws_stream, _) = tokio_tungstenite::connect_async(&relay_url)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to gateway relay: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to connect to relay: {}", e))?;
     let (mut sink, mut stream) = futures_util::StreamExt::split(ws_stream);
 
-    // Fetch runtime config
     let msg = encode_message(&OutgoingMessage::GetRuntimeConfig)?;
     futures_util::SinkExt::send(&mut sink, msg).await?;
     let backend_model = drain_until_runtime_config(&mut stream).await;
+
+    Ok((sink, stream, backend_model))
+}
+
+/// Reconnect backoff delays in seconds
+const RECONNECT_BACKOFF: [u64; 3] = [1, 3, 5];
+
+async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> Result<()> {
+    let (mut sink, mut stream, backend_model) = connect_relay(config, jwt).await?;
     let display_model = backend_model.as_deref().unwrap_or(model);
 
     println!("\u{26a1} Connected via relay (full tools)");
@@ -634,9 +656,57 @@ async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> R
                 let msg = encode_message(&OutgoingMessage::Chat {
                     text: trimmed.to_string(),
                 })?;
-                futures_util::SinkExt::send(&mut sink, msg).await?;
-                process_ws_response(&mut stream, &mut sink, &approval).await?;
-                println!();
+
+                // Send and process, with reconnect on failure
+                let send_result =
+                    futures_util::SinkExt::send(&mut sink, msg.clone()).await;
+                let chat_ok = match send_result {
+                    Ok(()) => {
+                        process_ws_response(&mut stream, &mut sink, &approval)
+                            .await
+                            .is_ok()
+                    }
+                    Err(_) => false,
+                };
+
+                if !chat_ok {
+                    // Attempt reconnect with backoff
+                    let mut reconnected = false;
+                    for (attempt, delay) in RECONNECT_BACKOFF.iter().enumerate() {
+                        render::stream::print_status(&format!(
+                            "Connection lost. Reconnecting ({}/{})...",
+                            attempt + 1,
+                            RECONNECT_BACKOFF.len()
+                        ));
+                        tokio::time::sleep(Duration::from_secs(*delay)).await;
+
+                        // Refresh JWT in case it rotated
+                        let creds =
+                            auth::credentials::Credentials::load().unwrap_or_default();
+                        if let Some(fresh_jwt) =
+                            try_get_valid_jwt(&creds, &config.gateway_url).await
+                        {
+                            match connect_relay(config, &fresh_jwt).await {
+                                Ok((new_sink, new_stream, _)) => {
+                                    sink = new_sink;
+                                    stream = new_stream;
+                                    render::stream::print_status("Reconnected.");
+                                    reconnected = true;
+                                    break;
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                    }
+                    if !reconnected {
+                        render::stream::print_error(
+                            "Failed to reconnect after 3 attempts.",
+                        );
+                        break;
+                    }
+                } else {
+                    println!();
+                }
             }
             Err(rustyline::error::ReadlineError::Eof) => break,
             Err(rustyline::error::ReadlineError::Interrupted) => break,
