@@ -61,3 +61,15 @@ fn test_device_flag_shows_in_help() {
         .success()
         .stdout(predicate::str::contains("--device"));
 }
+
+#[test]
+fn test_login_status_flag() {
+    // login --status should succeed and show auth info
+    Command::cargo_bin("magelab")
+        .unwrap()
+        .args(["login", "--status"])
+        .env_remove("MAGELAB_API_KEY")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Auth:"));
+}

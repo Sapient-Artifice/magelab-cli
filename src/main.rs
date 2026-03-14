@@ -54,8 +54,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authenticate with MageLab (Google OAuth)
-    Login,
+    /// Authenticate with MageLab
+    Login {
+        /// Login method: google (default) or magic (email code)
+        #[arg(long, default_value = "google")]
+        method: String,
+        /// Show current auth status instead of logging in
+        #[arg(long)]
+        status: bool,
+    },
     /// Clear stored credentials
     Logout,
     Models,
@@ -271,8 +278,44 @@ async fn handle_subcommand(cmd: &Commands, config: &mut Config) -> Result<()> {
             }
             return Ok(());
         }
-        Commands::Login => {
-            auth::oauth::login(&config.gateway_url).await?;
+        Commands::Login { method, status } => {
+            if *status {
+                let creds = auth::credentials::Credentials::load().unwrap_or_default();
+                if let Some(ref email) = creds.email {
+                    println!("Auth:    {} (WorkOS)", email);
+                } else if creds.has_token() {
+                    println!("Auth:    logged in (WorkOS)");
+                } else {
+                    println!("Auth:    not logged in");
+                }
+
+                if creds.is_token_valid() {
+                    let remaining = creds.expires_at.unwrap_or(0) - chrono::Utc::now().timestamp();
+                    let mins = remaining / 60;
+                    println!("Token:   valid, expires in {} minutes", mins);
+                } else if creds.has_token() {
+                    println!("Token:   expired");
+                } else {
+                    println!("Token:   none");
+                }
+
+                println!("Storage: credentials file");
+
+                if config.api_key().is_some() {
+                    let key = config.api_key().unwrap();
+                    let preview = if key.len() > 8 {
+                        format!("{}...{}", &key[..4], &key[key.len() - 4..])
+                    } else {
+                        "configured".to_string()
+                    };
+                    println!("API key: configured ({})", preview);
+                } else {
+                    println!("API key: not configured");
+                }
+            } else {
+                let login_method: auth::oauth::LoginMethod = method.parse()?;
+                auth::oauth::login_with_method(&config.gateway_url, &login_method).await?;
+            }
             return Ok(());
         }
         Commands::Logout => {
@@ -298,7 +341,7 @@ async fn handle_subcommand(cmd: &Commands, config: &mut Config) -> Result<()> {
             KeysAction::Create => account::create_key(&client).await,
             KeysAction::Revoke { id } => account::revoke_key(&client, id).await,
         },
-        Commands::Config | Commands::Login | Commands::Logout => unreachable!(),
+        Commands::Config | Commands::Login { .. } | Commands::Logout => unreachable!(),
     }
 }
 
