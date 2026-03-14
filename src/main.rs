@@ -256,11 +256,10 @@ async fn try_get_valid_jwt(
         return creds.access_token.clone();
     }
     if let Some(ref rt) = creds.refresh_token {
-        if let Ok(new_creds) = auth::oauth::refresh_token(rt).await {
+        if let Ok(new_creds) = auth::oauth::refresh_token(gateway_url, rt).await {
             return new_creds.access_token;
         }
     }
-    let _ = gateway_url; // reserved for future use
     None
 }
 
