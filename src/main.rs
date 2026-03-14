@@ -600,6 +600,32 @@ async fn run_relay_mode(config: &Config, cli: &Cli, model: &str, jwt: &str) -> R
                         SlashCommand::Mode => {
                             println!("relay mode (WebSocket via {})", config.gateway_url);
                         }
+                        SlashCommand::Status => {
+                            println!("Mode:   relay (full tools)");
+                            println!("Via:    {}", config.gateway_url);
+                        }
+                        SlashCommand::Devices => {
+                            let msg = Message::Text(
+                                serde_json::json!({"type": "list_devices"}).to_string(),
+                            );
+                            futures_util::SinkExt::send(&mut sink, msg).await?;
+                            println!("(device list will arrive via broker_status)");
+                        }
+                        SlashCommand::Bind(device) => {
+                            let msg = Message::Text(
+                                serde_json::json!({"type": "bind", "device_id": device})
+                                    .to_string(),
+                            );
+                            futures_util::SinkExt::send(&mut sink, msg).await?;
+                            println!("Binding to {}...", device);
+                        }
+                        SlashCommand::Detach => {
+                            let msg = Message::Text(
+                                serde_json::json!({"type": "detach"}).to_string(),
+                            );
+                            futures_util::SinkExt::send(&mut sink, msg).await?;
+                            println!("Detached from device.");
+                        }
                         _ => println!("Command not yet supported in relay mode."),
                     }
                     continue;
@@ -989,6 +1015,31 @@ where
             }
             IncomingMessage::TokenCount { total_count, .. } => {
                 render::stream::print_status(&format!("[{} tokens]", total_count));
+            }
+            IncomingMessage::BrokerStatus {
+                devices,
+                bound_device_id,
+                ..
+            } => {
+                if !devices.is_empty() {
+                    println!("Online devices:");
+                    for d in devices {
+                        let marker = if Some(d) == bound_device_id.as_ref() {
+                            " (bound)"
+                        } else {
+                            ""
+                        };
+                        println!("  {}{}", d, marker);
+                    }
+                }
+            }
+            IncomingMessage::BindResult { bound_device_id } => {
+                if let Some(d) = bound_device_id {
+                    println!("\u{26a1} Bound to {}", d);
+                }
+            }
+            IncomingMessage::BrokerError { code, message } => {
+                render::stream::print_error(&format!("Broker error ({}): {}", code, message));
             }
             IncomingMessage::Ping { .. } => {}
             IncomingMessage::Unknown => {

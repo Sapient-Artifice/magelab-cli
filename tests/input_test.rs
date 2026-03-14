@@ -75,3 +75,35 @@ fn test_not_a_command() {
     assert!(parse_slash_command("hello world").is_none());
     assert!(parse_slash_command("").is_none());
 }
+
+#[test]
+fn test_parse_status_command() {
+    assert!(matches!(
+        parse_slash_command("/status"),
+        Some(SlashCommand::Status)
+    ));
+}
+
+#[test]
+fn test_parse_devices_command() {
+    assert!(matches!(
+        parse_slash_command("/devices"),
+        Some(SlashCommand::Devices)
+    ));
+}
+
+#[test]
+fn test_parse_bind_command() {
+    let cmd = parse_slash_command("/bind macbook-pro");
+    assert!(matches!(cmd, Some(SlashCommand::Bind(d)) if d == "macbook-pro"));
+    // /bind without argument returns None
+    assert!(parse_slash_command("/bind").is_none());
+}
+
+#[test]
+fn test_parse_detach_command() {
+    assert!(matches!(
+        parse_slash_command("/detach"),
+        Some(SlashCommand::Detach)
+    ));
+}

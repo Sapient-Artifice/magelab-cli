@@ -11,6 +11,10 @@ pub enum SlashCommand {
     Config,
     Help,
     Quit,
+    Status,
+    Devices,
+    Bind(String),
+    Detach,
 }
 
 /// Parse a line of input into a slash command, if it starts with /
@@ -34,6 +38,10 @@ pub fn parse_slash_command(input: &str) -> Option<SlashCommand> {
         "/chat" => arg.map(SlashCommand::Chat),
         "/mode" => Some(SlashCommand::Mode),
         "/config" => Some(SlashCommand::Config),
+        "/status" => Some(SlashCommand::Status),
+        "/devices" => Some(SlashCommand::Devices),
+        "/bind" => arg.map(SlashCommand::Bind),
+        "/detach" => Some(SlashCommand::Detach),
         "/help" | "/h" | "/?" => Some(SlashCommand::Help),
         "/quit" | "/q" | "/exit" => Some(SlashCommand::Quit),
         _ => None,
@@ -50,6 +58,10 @@ pub fn print_help() {
     println!("  /clear          Reset conversation");
     println!("  /chats          List chat histories");
     println!("  /chat <name>    Switch to chat history");
+    println!("  /status         Show connection status");
+    println!("  /devices        List online desktop devices");
+    println!("  /bind <name>    Bind to a specific device");
+    println!("  /detach         Drop to chat-only mode");
     println!("  /mode           Show connection mode (local/remote)");
     println!("  /config         Show current settings");
     println!("  /help           Show this help");

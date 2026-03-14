@@ -198,6 +198,30 @@ pub enum IncomingMessage {
         error: Option<String>,
     },
 
+    #[serde(rename = "broker_status")]
+    BrokerStatus {
+        #[serde(default)]
+        devices: Vec<String>,
+        #[serde(default)]
+        bound_device_id: Option<String>,
+        #[serde(default)]
+        connected: bool,
+    },
+
+    #[serde(rename = "bind_result")]
+    BindResult {
+        #[serde(default)]
+        bound_device_id: Option<String>,
+    },
+
+    #[serde(rename = "broker_error")]
+    BrokerError {
+        #[serde(default)]
+        code: String,
+        #[serde(default)]
+        message: String,
+    },
+
     #[serde(rename = "ping")]
     Ping {},
 
