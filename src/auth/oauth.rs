@@ -14,58 +14,7 @@ use workos::user_management::{
 use workos::{ApiKey, WorkOs};
 
 use super::credentials::Credentials;
-use crate::render::stream::{print_status, print_success, print_warn};
-
-/// Animated input prompt with 24-bit color pulsing cursor.
-/// Shows "label ▌" with the block cursor shifting through the mage gradient.
-/// The 24-bit codes render as a glowing/pulsing cursor on macOS Terminal.app
-/// (which doesn't support truecolor — the "bug" creates a beautiful effect).
-fn animated_prompt(label: &str) -> String {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    // Print the label
-    print!("{} ", label);
-    std::io::stdout().flush().ok();
-
-    // Start cursor animation in background
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_clone = stop.clone();
-
-    let handle = std::thread::spawn(move || {
-        let frames = [
-            "\x1b[38;2;167;139;250m▌\x1b[0m",
-            "\x1b[38;2;153;115;248m▌\x1b[0m",
-            "\x1b[38;2;139;92;246m▌\x1b[0m",
-            "\x1b[38;2;124;58;237m▌\x1b[0m",
-            "\x1b[38;2;109;40;217m▌\x1b[0m",
-            "\x1b[38;2;99;102;241m▌\x1b[0m",
-            "\x1b[38;2;79;70;229m▌\x1b[0m",
-            "\x1b[38;2;99;102;241m▌\x1b[0m",
-            "\x1b[38;2;109;40;217m▌\x1b[0m",
-            "\x1b[38;2;124;58;237m▌\x1b[0m",
-            "\x1b[38;2;139;92;246m▌\x1b[0m",
-            "\x1b[38;2;153;115;248m▌\x1b[0m",
-        ];
-        let mut i = 0;
-        while !stop_clone.load(Ordering::Relaxed) {
-            print!("\x1b[1D{}", frames[i % frames.len()]); // move left 1, print cursor
-            std::io::stdout().flush().ok();
-            std::thread::sleep(std::time::Duration::from_millis(80));
-            i += 1;
-        }
-        print!("\x1b[1D \x1b[1D"); // clear the cursor
-        std::io::stdout().flush().ok();
-    });
-
-    // Read input (blocks until enter)
-    let mut input = String::new();
-    std::io::stdin().lock().read_line(&mut input).ok();
-    stop.store(true, Ordering::Relaxed);
-    handle.join().ok();
-
-    input.trim().to_string()
-}
+use crate::render::stream::{animated_prompt, print_status, print_success, print_warn};
 
 // 256-color gradient spinner using \x1b[38;5;Nm
 // Purple/indigo range in 256-color palette:

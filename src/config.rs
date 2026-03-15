@@ -133,12 +133,7 @@ impl Config {
     pub fn run_first_setup(&mut self) -> Result<()> {
         println!("Welcome to MageLab CLI!\n");
         println!("Enter your API key (get one at magelab.ai/dashboard):");
-        print!("> ");
-        std::io::Write::flush(&mut std::io::stdout())?;
-
-        let mut key = String::new();
-        std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut key)?;
-        let key = key.trim().to_string();
+        let key = crate::render::stream::animated_prompt("API key:");
 
         if key.is_empty() {
             anyhow::bail!("No API key provided");

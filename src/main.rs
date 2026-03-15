@@ -174,13 +174,9 @@ async fn resolve_auto_mode(config: &Config) -> Result<detect::ResolvedConnection
     println!("No local backend found and no credentials configured.\n");
     println!("  1) Log in with Google   (magelab login)");
     println!("  2) Enter an API key     (get one at magelab.ai/dashboard)\n");
-    print!("Choose [1/2]: ");
-    std::io::Write::flush(&mut std::io::stdout())?;
+    let choice = render::stream::animated_prompt("Choose [1/2]:");
 
-    let mut choice = String::new();
-    std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut choice)?;
-
-    match choice.trim() {
+    match choice.as_str() {
         "1" | "" => {
             auth::oauth::login(&config.gateway_url).await?;
             // After login, retry JWT path
