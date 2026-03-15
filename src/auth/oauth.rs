@@ -23,24 +23,24 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                " \x1b[35m🜁\x1b[0m",
-                " \x1b[95m🜂\x1b[0m",
-                " \x1b[34m🜃\x1b[0m",
-                " \x1b[94m🜄\x1b[0m",
-                " \x1b[35m✦\x1b[0m",
-                " \x1b[95m✧\x1b[0m",
-                " \x1b[34m◈\x1b[0m",
-                "🔮",
-                " \x1b[94m◇\x1b[0m",
-                " \x1b[35m✦\x1b[0m",
-                " \x1b[95m🜁\x1b[0m",
-                " \x1b[34m🜂\x1b[0m",
-                " \x1b[94m✧\x1b[0m",
-                " \x1b[35m◈\x1b[0m",
-                "💜",
-                " \x1b[95m◇\x1b[0m",
-                " \x1b[34m🜃\x1b[0m",
-                " \x1b[35m✧\x1b[0m",  // final tick (shown on finish)
+                "\x1b[35m🜁\x1b[0m",  // magenta
+                "\x1b[95m🜂\x1b[0m",  // bright magenta
+                "\x1b[34m🜃\x1b[0m",  // blue
+                "\x1b[94m🜄\x1b[0m",  // bright blue
+                "\x1b[35m✦\x1b[0m",   // magenta
+                "\x1b[95m✧\x1b[0m",   // bright magenta
+                "\x1b[34m◈\x1b[0m",   // blue
+                "\x1b[95m◆\x1b[0m",   // bright magenta diamond (crystal ball stand-in)
+                "\x1b[94m◇\x1b[0m",   // bright blue
+                "\x1b[35m✦\x1b[0m",   // magenta
+                "\x1b[95m🜁\x1b[0m",  // bright magenta
+                "\x1b[34m🜂\x1b[0m",  // blue
+                "\x1b[94m✧\x1b[0m",   // bright blue
+                "\x1b[35m◈\x1b[0m",   // magenta
+                "\x1b[95m♥\x1b[0m",   // bright magenta heart
+                "\x1b[34m◇\x1b[0m",   // blue
+                "\x1b[94m🜃\x1b[0m",  // bright blue
+                "\x1b[35m✧\x1b[0m",   // final tick (shown on finish)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
