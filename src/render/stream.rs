@@ -62,66 +62,123 @@ pub fn end_stream() {
     println!();
 }
 
-/// Animated input prompt with 24-bit color pulsing cursor.
-/// Shows "label ▌" with the block cursor shifting through the mage gradient.
-/// On macOS Terminal.app (no truecolor) this creates a glowing cursor effect.
+/// Animated input prompt with pulsing cursor.
+/// Shows "label ▌" pulsing until the user starts typing,
+/// then hides the animated cursor and shows the real one for typing.
 /// Returns the trimmed user input.
 pub fn animated_prompt(label: &str) -> String {
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+    use crossterm::terminal;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
 
-    // Hide terminal cursor so only our animated one shows
+    const CURSOR_FRAMES: &[&str] = &[
+        // purple → white
+        "\x1b[38;5;93m▌\x1b[0m",
+        "\x1b[38;5;135m▌\x1b[0m",
+        "\x1b[38;5;141m▌\x1b[0m",
+        "\x1b[38;5;183m▌\x1b[0m",
+        "\x1b[38;5;189m▌\x1b[0m",
+        "\x1b[38;5;231m▌\x1b[0m",
+        // white → purple
+        "\x1b[38;5;189m▌\x1b[0m",
+        "\x1b[38;5;183m▌\x1b[0m",
+        "\x1b[38;5;141m▌\x1b[0m",
+        "\x1b[38;5;135m▌\x1b[0m",
+        "\x1b[38;5;93m▌\x1b[0m",
+        // purple → black
+        "\x1b[38;5;57m▌\x1b[0m",
+        "\x1b[38;5;55m▌\x1b[0m",
+        "\x1b[38;5;54m▌\x1b[0m",
+        "\x1b[38;5;17m▌\x1b[0m",
+        "\x1b[38;5;16m▌\x1b[0m",
+        // black → purple
+        "\x1b[38;5;17m▌\x1b[0m",
+        "\x1b[38;5;54m▌\x1b[0m",
+        "\x1b[38;5;55m▌\x1b[0m",
+        "\x1b[38;5;57m▌\x1b[0m",
+    ];
+
+    // Print label, hide terminal cursor, enter raw mode
     print!("\x1b[?25l{} ", label);
     io::stdout().flush().ok();
+    terminal::enable_raw_mode().ok();
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
 
+    // Animate cursor in background
     let handle = std::thread::spawn(move || {
-        let frames = [
-            // purple → white
-            "\x1b[38;5;93m▌\x1b[0m",   // violet
-            "\x1b[38;5;135m▌\x1b[0m",  // purple
-            "\x1b[38;5;141m▌\x1b[0m",  // lavender
-            "\x1b[38;5;183m▌\x1b[0m",  // light lavender
-            "\x1b[38;5;189m▌\x1b[0m",  // near-white purple
-            "\x1b[38;5;231m▌\x1b[0m",  // white
-            // white → purple
-            "\x1b[38;5;189m▌\x1b[0m",
-            "\x1b[38;5;183m▌\x1b[0m",
-            "\x1b[38;5;141m▌\x1b[0m",
-            "\x1b[38;5;135m▌\x1b[0m",
-            "\x1b[38;5;93m▌\x1b[0m",   // violet
-            // purple → black
-            "\x1b[38;5;57m▌\x1b[0m",   // indigo
-            "\x1b[38;5;55m▌\x1b[0m",   // dark indigo
-            "\x1b[38;5;54m▌\x1b[0m",   // darker
-            "\x1b[38;5;17m▌\x1b[0m",   // near-black blue
-            "\x1b[38;5;16m▌\x1b[0m",   // black
-            // black → purple
-            "\x1b[38;5;17m▌\x1b[0m",
-            "\x1b[38;5;54m▌\x1b[0m",
-            "\x1b[38;5;55m▌\x1b[0m",
-            "\x1b[38;5;57m▌\x1b[0m",
-        ];
         let mut i = 0;
         while !stop_clone.load(Ordering::Relaxed) {
-            print!("\x1b[1D{}", frames[i % frames.len()]);
+            print!("\x1b[1D{}", CURSOR_FRAMES[i % CURSOR_FRAMES.len()]);
             io::stdout().flush().ok();
-            std::thread::sleep(std::time::Duration::from_millis(80));
+            std::thread::sleep(Duration::from_millis(80));
             i += 1;
         }
+        // Erase animated cursor
         print!("\x1b[1D \x1b[1D");
         io::stdout().flush().ok();
     });
 
+    // Read keypresses in raw mode, building the input string
     let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    stop.store(true, Ordering::Relaxed);
-    handle.join().ok();
+    let mut handle = Some(handle);
+    loop {
+        if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = event::read() {
+                // On first keypress, kill animation and show real cursor
+                if !stop.load(Ordering::Relaxed) && input.is_empty() {
+                    stop.store(true, Ordering::Relaxed);
+                    if let Some(h) = handle.take() {
+                        h.join().ok();
+                    }
+                    print!("\x1b[?25h"); // show terminal cursor
+                    io::stdout().flush().ok();
+                }
 
-    // Restore terminal cursor
-    print!("\x1b[?25h");
+                match key.code {
+                    KeyCode::Enter => {
+                        println!(); // newline after enter
+                        break;
+                    }
+                    KeyCode::Backspace => {
+                        if !input.is_empty() {
+                            input.pop();
+                            print!("\x1b[1D \x1b[1D"); // erase char
+                            io::stdout().flush().ok();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                            // Ctrl+C: clean up and bail
+                            stop.store(true, Ordering::Relaxed);
+                            println!();
+                            break;
+                        }
+                        input.push(c);
+                        print!("{}", c);
+                        io::stdout().flush().ok();
+                    }
+                    KeyCode::Esc => {
+                        stop.store(true, Ordering::Relaxed);
+                        println!();
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Ensure cleanup
+    if !stop.load(Ordering::Relaxed) {
+        stop.store(true, Ordering::Relaxed);
+    }
+
+    terminal::disable_raw_mode().ok();
+    print!("\x1b[?25h"); // ensure cursor restored
     io::stdout().flush().ok();
 
     input.trim().to_string()
