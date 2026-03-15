@@ -70,7 +70,8 @@ pub fn animated_prompt(label: &str) -> String {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    print!("{} ", label);
+    // Hide terminal cursor so only our animated one shows
+    print!("\x1b[?25l{} ", label);
     io::stdout().flush().ok();
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -106,6 +107,10 @@ pub fn animated_prompt(label: &str) -> String {
     io::stdin().read_line(&mut input).ok();
     stop.store(true, Ordering::Relaxed);
     handle.join().ok();
+
+    // Restore terminal cursor
+    print!("\x1b[?25h");
+    io::stdout().flush().ok();
 
     input.trim().to_string()
 }
