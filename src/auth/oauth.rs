@@ -26,30 +26,43 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                // ✦ Air — bright to mid
-                "\x1b[38;2;167;139;250m\x1b[49m✦\x1b[0m",  // mage-400 #a78bfa
-                "\x1b[38;2;153;115;248m\x1b[49m✦\x1b[0m",  // mage-450
-                "\x1b[38;2;139;92;246m\x1b[49m✦\x1b[0m",   // mage-500 #8b5cf6
-                "\x1b[38;2;124;58;237m\x1b[49m✦\x1b[0m",   // mage-600 #7c3aed
-                "\x1b[38;2;109;40;217m\x1b[49m✦\x1b[0m",   // mage-700 #6d28d9
-                // ✧ Fire — mid to deep
-                "\x1b[38;2;91;33;182m\x1b[49m✧\x1b[0m",    // mage-800 #5b21b6
-                "\x1b[38;2;76;29;149m\x1b[49m✧\x1b[0m",    // mage-900 #4c1d95
-                "\x1b[38;2;91;33;182m\x1b[49m✧\x1b[0m",    // mage-800
-                "\x1b[38;2;109;40;217m\x1b[49m✧\x1b[0m",   // mage-700
-                "\x1b[38;2;124;58;237m\x1b[49m✧\x1b[0m",   // mage-600
-                // ◆ Earth — mid to bright
-                "\x1b[38;2;139;92;246m\x1b[49m◆\x1b[0m",   // mage-500
-                "\x1b[38;2;153;115;248m\x1b[49m◆\x1b[0m",  // mage-450
-                "\x1b[38;2;167;139;250m\x1b[49m◆\x1b[0m",  // mage-400
-                "\x1b[38;2;196;181;253m\x1b[49m◆\x1b[0m",  // mage-300 #c4b5fd
-                "\x1b[38;2;167;139;250m\x1b[49m◆\x1b[0m",  // mage-400
-                // ◇ Water — bright back to mid
-                "\x1b[38;2;153;115;248m\x1b[49m◇\x1b[0m",  // mage-450
-                "\x1b[38;2;139;92;246m\x1b[49m◇\x1b[0m",   // mage-500
-                "\x1b[38;2;124;58;237m\x1b[49m◇\x1b[0m",   // mage-600
-                "\x1b[38;2;139;92;246m\x1b[49m◇\x1b[0m",   // mage-500
-                "\x1b[38;2;167;139;250m\x1b[49m✦\x1b[0m",  // (finish) mage-400
+                // 🜁 Air — mage-400 down to mage-700
+                "\x1b[38;2;167;139;250m\x1b[49m🜁\x1b[0m",  // mage-400
+                "\x1b[38;2;157;122;249m\x1b[49m🜁\x1b[0m",
+                "\x1b[38;2;147;105;247m\x1b[49m🜁\x1b[0m",
+                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",   // mage-500
+                "\x1b[38;2;131;75;241m\x1b[49m🜁\x1b[0m",
+                "\x1b[38;2;124;58;237m\x1b[49m🜁\x1b[0m",   // mage-600
+                "\x1b[38;2;116;49;227m\x1b[49m🜁\x1b[0m",
+                "\x1b[38;2;109;40;217m\x1b[49m🜁\x1b[0m",   // mage-700
+                // 🜂 Fire — mage-700 into indigo-600
+                "\x1b[38;2;104;50;223m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;99;60;229m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;94;71;235m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;89;82;238m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;84;76;233m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;79;70;229m\x1b[49m🜂\x1b[0m",   // indigo-600
+                "\x1b[38;2;84;76;233m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;89;82;238m\x1b[49m🜂\x1b[0m",
+                // 🜃 Earth — indigo back to mage-500
+                "\x1b[38;2;94;71;235m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;99;60;229m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;104;50;223m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",   // mage-700
+                "\x1b[38;2;116;49;227m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;124;58;237m\x1b[49m🜃\x1b[0m",   // mage-600
+                "\x1b[38;2;131;75;241m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;139;92;246m\x1b[49m🜃\x1b[0m",   // mage-500
+                // 🜄 Water — mage-500 up to mage-400
+                "\x1b[38;2;147;105;247m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;153;115;248m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;160;127;249m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;167;139;250m\x1b[49m🜄\x1b[0m",  // mage-400
+                "\x1b[38;2;160;127;249m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;153;115;248m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;147;105;247m\x1b[49m🜄\x1b[0m",
+                "\x1b[38;2;139;92;246m\x1b[49m🜄\x1b[0m",   // mage-500
+                "\x1b[38;2;167;139;250m\x1b[49m🜁\x1b[0m",  // (finish)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
