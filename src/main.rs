@@ -798,17 +798,21 @@ async fn run_remote_mode(config: &Config, cli: &Cli, model: &str) -> Result<()> 
     Ok(())
 }
 
-/// Create a spinner for waiting states
-fn make_spinner(msg: &str) -> ProgressBar {
+/// Create a mage-themed spinner for waiting states
+pub fn make_spinner(msg: &str) -> ProgressBar {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-            .template("{spinner} {msg}")
+            .tick_strings(&[
+                "🜁", "🜂", "🜃", "🜄", // alchemical elements
+                "✦", "✧", "✦", "✧", // stars
+                "◈", "◇", "◈", "◇", // gems
+            ])
+            .template("{spinner:.magenta} {msg}")
             .unwrap(),
     );
     spinner.set_message(msg.to_string());
-    spinner.enable_steady_tick(Duration::from_millis(80));
+    spinner.enable_steady_tick(Duration::from_millis(100));
     spinner
 }
 

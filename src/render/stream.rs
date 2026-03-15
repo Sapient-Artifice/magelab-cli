@@ -21,6 +21,30 @@ pub fn print_status(msg: &str) {
     .ok();
 }
 
+/// Print a success message in green
+pub fn print_success(msg: &str) {
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Green),
+        Print(format!("{}\n", msg)),
+        ResetColor,
+    )
+    .ok();
+}
+
+/// Print a warning message in yellow
+pub fn print_warn(msg: &str) {
+    let mut stdout = io::stdout();
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Yellow),
+        Print(format!("{}\n", msg)),
+        ResetColor,
+    )
+    .ok();
+}
+
 /// Print an error message in red
 pub fn print_error(msg: &str) {
     let mut stdout = io::stdout();
