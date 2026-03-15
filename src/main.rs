@@ -804,15 +804,24 @@ pub fn make_spinner(msg: &str) -> ProgressBar {
     spinner.set_style(
         ProgressStyle::default_spinner()
             .tick_strings(&[
-                "🜁", "🜂", "🜃", "🜄", // alchemical elements
-                "✦", "✧", "✦", "✧", // stars
-                "◈", "◇", "◈", "◇", // gems
+                "🔮",            // crystal ball
+                " 🧙",           // wizard
+                "  ✨",          // sparkles
+                "   ⚡",         // lightning
+                "    🌙",        // crescent
+                "   ⚡",         // lightning
+                "  ✨",          // sparkles
+                " 🧙",           // wizard
+                "🔮",            // crystal ball
+                " 🪄",           // wand
+                "  💜",          // purple heart
+                " 🪄",           // wand
             ])
-            .template("{spinner:.magenta} {msg}")
+            .template("{spinner} {msg:.magenta}")
             .unwrap(),
     );
     spinner.set_message(msg.to_string());
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner.enable_steady_tick(Duration::from_millis(120));
     spinner
 }
 
