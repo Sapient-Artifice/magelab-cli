@@ -64,7 +64,7 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
                 "\x1b[38;2;139;92;246m\x1b[49m🜄\x1b[0m",   // mage-500
                 "\x1b[38;2;167;139;250m\x1b[49m🜁\x1b[0m",  // (finish)
             ])
-            .template("{spinner} {msg:.magenta}")
+            .template("{spinner} {msg}")
             .unwrap(),
     );
     s.set_message(msg.to_string());
