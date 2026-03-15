@@ -26,31 +26,36 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // Air      mage-500
-                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // Air      mage-525
-                "\x1b[38;2;129;75;241m\x1b[49m🜂\x1b[0m",  // Fire     mage-550
-                "\x1b[38;2;124;58;237m\x1b[49m🜂\x1b[0m",  // Fire     mage-600
-                "\x1b[38;2;114;47;227m\x1b[49m🜃\x1b[0m",  // Earth    mage-650
-                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",  // Earth    mage-700
-                "\x1b[38;2;104;71;229m\x1b[49m🜄\x1b[0m",  // Water    → indigo
-                "\x1b[38;2;99;102;241m\x1b[49m🜄\x1b[0m",  // Water    indigo-500
-                "\x1b[38;2;89;86;235m\x1b[49m🜁\x1b[0m",   // Air      indigo-550
-                "\x1b[38;2;79;70;229m\x1b[49m🜁\x1b[0m",   // Air      indigo-600
-                "\x1b[38;2;89;86;235m\x1b[49m🜂\x1b[0m",   // Fire     indigo-550
-                "\x1b[38;2;99;102;241m\x1b[49m🜂\x1b[0m",  // Fire     indigo-500
-                "\x1b[38;2;104;71;229m\x1b[49m🜃\x1b[0m",  // Earth    → purple
-                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",  // Earth    mage-700
-                "\x1b[38;2;114;47;227m\x1b[49m🜄\x1b[0m",  // Water    mage-650
-                "\x1b[38;2;124;58;237m\x1b[49m🜄\x1b[0m",  // Water    mage-600
-                "\x1b[38;2;129;75;241m\x1b[49m🜁\x1b[0m",  // Air      mage-550
-                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // Air      mage-525
-                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // Air      (finish)
+                // 🜁 Air — color pulses purple → deep
+                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // mage-500
+                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // mage-525
+                "\x1b[38;2;129;75;241m\x1b[49m🜁\x1b[0m",  // mage-550
+                "\x1b[38;2;124;58;237m\x1b[49m🜁\x1b[0m",  // mage-600
+                "\x1b[38;2;114;47;227m\x1b[49m🜁\x1b[0m",  // mage-650
+                // 🜂 Fire — color pulses deep → indigo
+                "\x1b[38;2;109;40;217m\x1b[49m🜂\x1b[0m",  // mage-700
+                "\x1b[38;2;104;71;229m\x1b[49m🜂\x1b[0m",
+                "\x1b[38;2;99;102;241m\x1b[49m🜂\x1b[0m",  // indigo-500
+                "\x1b[38;2;89;86;235m\x1b[49m🜂\x1b[0m",   // indigo-550
+                "\x1b[38;2;79;70;229m\x1b[49m🜂\x1b[0m",   // indigo-600
+                // 🜃 Earth — color returns indigo → deep
+                "\x1b[38;2;89;86;235m\x1b[49m🜃\x1b[0m",   // indigo-550
+                "\x1b[38;2;99;102;241m\x1b[49m🜃\x1b[0m",  // indigo-500
+                "\x1b[38;2;104;71;229m\x1b[49m🜃\x1b[0m",
+                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",  // mage-700
+                "\x1b[38;2;114;47;227m\x1b[49m🜃\x1b[0m",  // mage-650
+                // 🜄 Water — color returns deep → purple
+                "\x1b[38;2;124;58;237m\x1b[49m🜄\x1b[0m",  // mage-600
+                "\x1b[38;2;129;75;241m\x1b[49m🜄\x1b[0m",  // mage-550
+                "\x1b[38;2;134;83;243m\x1b[49m🜄\x1b[0m",  // mage-525
+                "\x1b[38;2;139;92;246m\x1b[49m🜄\x1b[0m",  // mage-500
+                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // (finish)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
     );
     s.set_message(msg.to_string());
-    s.enable_steady_tick(std::time::Duration::from_millis(80));
+    s.enable_steady_tick(std::time::Duration::from_millis(100));
     s
 }
 
