@@ -842,7 +842,7 @@ pub fn make_spinner(msg: &str) -> ProgressBar {
             .unwrap(),
     );
     spinner.set_message(msg.to_string());
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner.enable_steady_tick(Duration::from_millis(60));
     spinner
 }
 

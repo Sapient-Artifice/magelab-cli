@@ -68,7 +68,7 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
             .unwrap(),
     );
     s.set_message(msg.to_string());
-    s.enable_steady_tick(std::time::Duration::from_millis(100));
+    s.enable_steady_tick(std::time::Duration::from_millis(60));
     s
 }
 
