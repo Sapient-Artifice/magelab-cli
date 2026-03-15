@@ -23,22 +23,22 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                "\x1b[35m🜁\x1b[0m",  // magenta
-                "\x1b[95m🜂\x1b[0m",  // bright magenta
-                "\x1b[34m🜃\x1b[0m",  // blue
-                "\x1b[94m🜄\x1b[0m",  // bright blue
-                "\x1b[35m✦\x1b[0m",   // magenta
-                "\x1b[95m✧\x1b[0m",   // bright magenta
-                "\x1b[34m◈\x1b[0m",   // blue
-                "\x1b[94m◇\x1b[0m",   // bright blue
-                "🔮",                  // crystal ball (native color)
-                "\x1b[35m✦\x1b[0m",   // magenta
-                "\x1b[95m🜁\x1b[0m",  // bright magenta
-                "\x1b[34m🜂\x1b[0m",  // blue
-                "\x1b[94m✧\x1b[0m",   // bright blue
-                "\x1b[35m◈\x1b[0m",   // magenta
-                "\x1b[95m◇\x1b[0m",   // bright magenta
-                "💜",                  // purple heart (native color)
+                "\x1b[35m🜁\x1b[0m ", // magenta        (1-cell + pad)
+                "\x1b[95m🜂\x1b[0m ", // bright magenta (1-cell + pad)
+                "\x1b[34m🜃\x1b[0m ", // blue           (1-cell + pad)
+                "\x1b[94m🜄\x1b[0m ", // bright blue    (1-cell + pad)
+                "\x1b[35m✦\x1b[0m ",  // magenta        (1-cell + pad)
+                "\x1b[95m✧\x1b[0m ",  // bright magenta (1-cell + pad)
+                "\x1b[34m◈\x1b[0m ",  // blue           (1-cell + pad)
+                "\x1b[94m◇\x1b[0m ",  // bright blue    (1-cell + pad)
+                "🔮",                  // crystal ball   (2-cell)
+                "\x1b[35m✦\x1b[0m ",  // magenta        (1-cell + pad)
+                "\x1b[95m🜁\x1b[0m ", // bright magenta (1-cell + pad)
+                "\x1b[34m🜂\x1b[0m ", // blue           (1-cell + pad)
+                "\x1b[94m✧\x1b[0m ",  // bright blue    (1-cell + pad)
+                "\x1b[35m◈\x1b[0m ",  // magenta        (1-cell + pad)
+                "\x1b[95m◇\x1b[0m ",  // bright magenta (1-cell + pad)
+                "💜",                  // purple heart   (2-cell)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
