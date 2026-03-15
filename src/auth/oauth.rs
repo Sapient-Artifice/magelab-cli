@@ -26,42 +26,22 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                // 🜁 Air — bright purple descending
-                "\x1b[38;5;141m🜁\x1b[0m",  // light lavender
-                "\x1b[38;5;135m🜁\x1b[0m",  // lavender
-                "\x1b[38;5;134m🜁\x1b[0m",  // purple
+                "\x1b[38;5;141m🜁\x1b[0m",  // lavender
+                "\x1b[38;5;135m🜁\x1b[0m",  // purple
                 "\x1b[38;5;128m🜁\x1b[0m",  // med purple
-                "\x1b[38;5;127m🜁\x1b[0m",  // deep purple
                 "\x1b[38;5;93m🜁\x1b[0m",   // violet
-                "\x1b[38;5;92m🜁\x1b[0m",   // dark violet
-                "\x1b[38;5;91m🜁\x1b[0m",   // plum
-                // 🜂 Fire — into indigo
                 "\x1b[38;5;57m🜂\x1b[0m",   // indigo
                 "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
                 "\x1b[38;5;55m🜂\x1b[0m",   // dark indigo
                 "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
-                "\x1b[38;5;57m🜂\x1b[0m",   // indigo
-                "\x1b[38;5;63m🜂\x1b[0m",   // slate indigo
-                "\x1b[38;5;93m🜂\x1b[0m",   // violet
-                "\x1b[38;5;92m🜂\x1b[0m",   // dark violet
-                // 🜃 Earth — returning through purple
                 "\x1b[38;5;91m🜃\x1b[0m",   // plum
-                "\x1b[38;5;92m🜃\x1b[0m",   // dark violet
                 "\x1b[38;5;93m🜃\x1b[0m",   // violet
-                "\x1b[38;5;127m🜃\x1b[0m",  // deep purple
                 "\x1b[38;5;128m🜃\x1b[0m",  // med purple
-                "\x1b[38;5;134m🜃\x1b[0m",  // purple
-                "\x1b[38;5;135m🜃\x1b[0m",  // lavender
-                "\x1b[38;5;141m🜃\x1b[0m",  // light lavender
-                // 🜄 Water — bright pulse
-                "\x1b[38;5;177m🜄\x1b[0m",  // light pink-purple
-                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
-                "\x1b[38;5;135m🜄\x1b[0m",  // lavender
-                "\x1b[38;5;134m🜄\x1b[0m",  // purple
-                "\x1b[38;5;135m🜄\x1b[0m",  // lavender
-                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
-                "\x1b[38;5;177m🜄\x1b[0m",  // light pink-purple
-                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
+                "\x1b[38;5;135m🜃\x1b[0m",  // purple
+                "\x1b[38;5;141m🜄\x1b[0m",  // lavender
+                "\x1b[38;5;177m🜄\x1b[0m",  // pink-purple
+                "\x1b[38;5;141m🜄\x1b[0m",  // lavender
+                "\x1b[38;5;135m🜄\x1b[0m",  // purple
                 "\x1b[38;5;141m🜁\x1b[0m",  // (finish)
             ])
             .template("{spinner} {msg}")
