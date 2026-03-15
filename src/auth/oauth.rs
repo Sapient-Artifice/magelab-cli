@@ -16,53 +16,53 @@ use workos::{ApiKey, WorkOs};
 use super::credentials::Credentials;
 use crate::render::stream::{print_status, print_success, print_warn};
 
-// 24-bit true color gradient spinner
-// Explicit fg + bg each frame to prevent color bleed between redraws
-// fg = gradient color, bg = terminal black (force reset)
+// 256-color gradient spinner using \x1b[38;5;Nm
+// Purple/indigo range in 256-color palette:
+//   129=bright purple, 128=purple, 127=deep purple,
+//   93=violet, 57=indigo, 56=deep indigo,
+//   92=dark purple, 91=plum
 fn spinner(msg: &str) -> indicatif::ProgressBar {
     let s = indicatif::ProgressBar::new_spinner();
-    // \x1b[38;2;R;G;Bm = 24-bit foreground
-    // \x1b[49m = default background (reset bg only, not fg)
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                // 🜁 Air — mage-400 down to mage-700
-                "\x1b[38;2;167;139;250m\x1b[49m🜁\x1b[0m",  // mage-400
-                "\x1b[38;2;157;122;249m\x1b[49m🜁\x1b[0m",
-                "\x1b[38;2;147;105;247m\x1b[49m🜁\x1b[0m",
-                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",   // mage-500
-                "\x1b[38;2;131;75;241m\x1b[49m🜁\x1b[0m",
-                "\x1b[38;2;124;58;237m\x1b[49m🜁\x1b[0m",   // mage-600
-                "\x1b[38;2;116;49;227m\x1b[49m🜁\x1b[0m",
-                "\x1b[38;2;109;40;217m\x1b[49m🜁\x1b[0m",   // mage-700
-                // 🜂 Fire — mage-700 into indigo-600
-                "\x1b[38;2;104;50;223m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;99;60;229m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;94;71;235m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;89;82;238m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;84;76;233m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;79;70;229m\x1b[49m🜂\x1b[0m",   // indigo-600
-                "\x1b[38;2;84;76;233m\x1b[49m🜂\x1b[0m",
-                "\x1b[38;2;89;82;238m\x1b[49m🜂\x1b[0m",
-                // 🜃 Earth — indigo back to mage-500
-                "\x1b[38;2;94;71;235m\x1b[49m🜃\x1b[0m",
-                "\x1b[38;2;99;60;229m\x1b[49m🜃\x1b[0m",
-                "\x1b[38;2;104;50;223m\x1b[49m🜃\x1b[0m",
-                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",   // mage-700
-                "\x1b[38;2;116;49;227m\x1b[49m🜃\x1b[0m",
-                "\x1b[38;2;124;58;237m\x1b[49m🜃\x1b[0m",   // mage-600
-                "\x1b[38;2;131;75;241m\x1b[49m🜃\x1b[0m",
-                "\x1b[38;2;139;92;246m\x1b[49m🜃\x1b[0m",   // mage-500
-                // 🜄 Water — mage-500 up to mage-400
-                "\x1b[38;2;147;105;247m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;153;115;248m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;160;127;249m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;167;139;250m\x1b[49m🜄\x1b[0m",  // mage-400
-                "\x1b[38;2;160;127;249m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;153;115;248m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;147;105;247m\x1b[49m🜄\x1b[0m",
-                "\x1b[38;2;139;92;246m\x1b[49m🜄\x1b[0m",   // mage-500
-                "\x1b[38;2;167;139;250m\x1b[49m🜁\x1b[0m",  // (finish)
+                // 🜁 Air — bright purple descending
+                "\x1b[38;5;141m🜁\x1b[0m",  // light lavender
+                "\x1b[38;5;135m🜁\x1b[0m",  // lavender
+                "\x1b[38;5;134m🜁\x1b[0m",  // purple
+                "\x1b[38;5;128m🜁\x1b[0m",  // med purple
+                "\x1b[38;5;127m🜁\x1b[0m",  // deep purple
+                "\x1b[38;5;93m🜁\x1b[0m",   // violet
+                "\x1b[38;5;92m🜁\x1b[0m",   // dark violet
+                "\x1b[38;5;91m🜁\x1b[0m",   // plum
+                // 🜂 Fire — into indigo
+                "\x1b[38;5;57m🜂\x1b[0m",   // indigo
+                "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
+                "\x1b[38;5;55m🜂\x1b[0m",   // dark indigo
+                "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
+                "\x1b[38;5;57m🜂\x1b[0m",   // indigo
+                "\x1b[38;5;63m🜂\x1b[0m",   // slate indigo
+                "\x1b[38;5;93m🜂\x1b[0m",   // violet
+                "\x1b[38;5;92m🜂\x1b[0m",   // dark violet
+                // 🜃 Earth — returning through purple
+                "\x1b[38;5;91m🜃\x1b[0m",   // plum
+                "\x1b[38;5;92m🜃\x1b[0m",   // dark violet
+                "\x1b[38;5;93m🜃\x1b[0m",   // violet
+                "\x1b[38;5;127m🜃\x1b[0m",  // deep purple
+                "\x1b[38;5;128m🜃\x1b[0m",  // med purple
+                "\x1b[38;5;134m🜃\x1b[0m",  // purple
+                "\x1b[38;5;135m🜃\x1b[0m",  // lavender
+                "\x1b[38;5;141m🜃\x1b[0m",  // light lavender
+                // 🜄 Water — bright pulse
+                "\x1b[38;5;177m🜄\x1b[0m",  // light pink-purple
+                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
+                "\x1b[38;5;135m🜄\x1b[0m",  // lavender
+                "\x1b[38;5;134m🜄\x1b[0m",  // purple
+                "\x1b[38;5;135m🜄\x1b[0m",  // lavender
+                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
+                "\x1b[38;5;177m🜄\x1b[0m",  // light pink-purple
+                "\x1b[38;5;141m🜄\x1b[0m",  // light lavender
+                "\x1b[38;5;141m🜁\x1b[0m",  // (finish)
             ])
             .template("{spinner} {msg}")
             .unwrap(),
