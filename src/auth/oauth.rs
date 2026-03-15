@@ -16,37 +16,37 @@ use workos::{ApiKey, WorkOs};
 use super::credentials::Credentials;
 use crate::render::stream::{print_status, print_success, print_warn};
 
+// 24-bit true color gradient spinner
+// Cycles through MageLab brand palette: purple → deep purple → indigo → blue → back
+// \x1b[38;2;R;G;Bm sets 24-bit foreground color
 fn spinner(msg: &str) -> indicatif::ProgressBar {
     let s = indicatif::ProgressBar::new_spinner();
-    // Color-shifting alchemical spinner with occasional crystal ball / purple heart
-    // ANSI: 35=magenta, 95=bright magenta, 34=blue, 94=bright blue, 36=cyan
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                "\x1b[35m🜁\x1b[0m",  // magenta
-                "\x1b[95m🜂\x1b[0m",  // bright magenta
-                "\x1b[34m🜃\x1b[0m",  // blue
-                "\x1b[94m🜄\x1b[0m",  // bright blue
-                "\x1b[35m✦\x1b[0m",   // magenta
-                "\x1b[95m✧\x1b[0m",   // bright magenta
-                "\x1b[34m◈\x1b[0m",   // blue
-                "\x1b[95m◆\x1b[0m",   // bright magenta diamond (crystal ball stand-in)
-                "\x1b[94m◇\x1b[0m",   // bright blue
-                "\x1b[35m✦\x1b[0m",   // magenta
-                "\x1b[95m🜁\x1b[0m",  // bright magenta
-                "\x1b[34m🜂\x1b[0m",  // blue
-                "\x1b[94m✧\x1b[0m",   // bright blue
-                "\x1b[35m◈\x1b[0m",   // magenta
-                "\x1b[95m♥\x1b[0m",   // bright magenta heart
-                "\x1b[34m◇\x1b[0m",   // blue
-                "\x1b[94m🜃\x1b[0m",  // bright blue
-                "\x1b[35m✧\x1b[0m",   // final tick (shown on finish)
+                "\x1b[38;2;139;92;246m🜁\x1b[0m",  // #8b5cf6 mage-500
+                "\x1b[38;2;129;75;241m🜂\x1b[0m",  // mage-550
+                "\x1b[38;2;124;58;237m🜃\x1b[0m",  // #7c3aed mage-600
+                "\x1b[38;2;114;47;227m🜄\x1b[0m",  // mage-650
+                "\x1b[38;2;109;40;217m✦\x1b[0m",   // #6d28d9 mage-700
+                "\x1b[38;2;104;71;229m✧\x1b[0m",   // → indigo
+                "\x1b[38;2;99;102;241m◈\x1b[0m",   // #6366f1 indigo-500
+                "\x1b[38;2;89;86;235m◆\x1b[0m",    // indigo-550
+                "\x1b[38;2;79;70;229m◇\x1b[0m",    // #4f46e5 indigo-600
+                "\x1b[38;2;89;86;235m♥\x1b[0m",    // indigo-550 (return)
+                "\x1b[38;2;99;102;241m✦\x1b[0m",   // #6366f1 indigo-500
+                "\x1b[38;2;104;71;229m🜁\x1b[0m",  // → purple
+                "\x1b[38;2;109;40;217m🜂\x1b[0m",  // #6d28d9 mage-700
+                "\x1b[38;2;114;47;227m✧\x1b[0m",   // mage-650
+                "\x1b[38;2;124;58;237m◈\x1b[0m",   // #7c3aed mage-600
+                "\x1b[38;2;129;75;241m🜃\x1b[0m",  // mage-550
+                "\x1b[38;2;139;92;246m✧\x1b[0m",   // #8b5cf6 (finish)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
     );
     s.set_message(msg.to_string());
-    s.enable_steady_tick(std::time::Duration::from_millis(100));
+    s.enable_steady_tick(std::time::Duration::from_millis(80));
     s
 }
 
