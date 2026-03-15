@@ -803,21 +803,8 @@ pub fn make_spinner(msg: &str) -> ProgressBar {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
-            .tick_strings(&[
-                "🔮",            // crystal ball
-                " 🧙",           // wizard
-                "  ✨",          // sparkles
-                "   ⚡",         // lightning
-                "    🌙",        // crescent
-                "   ⚡",         // lightning
-                "  ✨",          // sparkles
-                " 🧙",           // wizard
-                "🔮",            // crystal ball
-                " 🪄",           // wand
-                "  💜",          // purple heart
-                " 🪄",           // wand
-            ])
-            .template("{spinner} {msg:.magenta}")
+            .tick_strings(&["🜁", "🜂", "🜃", "🜄", "✦", "✧", "✦", "✧", "◈", "◇", "◈", "◇"])
+            .template("{spinner:.magenta} {msg:.magenta}")
             .unwrap(),
     );
     spinner.set_message(msg.to_string());

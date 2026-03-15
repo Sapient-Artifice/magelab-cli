@@ -33,12 +33,12 @@ pub fn print_success(msg: &str) {
     .ok();
 }
 
-/// Print a warning message in yellow
+/// Print a warning message in dark yellow (legible on light and dark backgrounds)
 pub fn print_warn(msg: &str) {
     let mut stdout = io::stdout();
     execute!(
         stdout,
-        SetForegroundColor(Color::Yellow),
+        SetForegroundColor(Color::DarkYellow),
         Print(format!("{}\n", msg)),
         ResetColor,
     )

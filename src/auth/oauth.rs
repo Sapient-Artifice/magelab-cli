@@ -20,25 +20,12 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     let s = indicatif::ProgressBar::new_spinner();
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
-            .tick_strings(&[
-                "🔮",            // crystal ball
-                " 🧙",           // wizard
-                "  ✨",          // sparkles
-                "   ⚡",         // lightning
-                "    🌙",        // crescent
-                "   ⚡",         // lightning
-                "  ✨",          // sparkles
-                " 🧙",           // wizard
-                "🔮",            // crystal ball
-                " 🪄",           // wand
-                "  💜",          // purple heart
-                " 🪄",           // wand
-            ])
-            .template("{spinner} {msg:.magenta}")
+            .tick_strings(&["🜁", "🜂", "🜃", "🜄", "✦", "✧", "✦", "✧", "◈", "◇", "◈", "◇"])
+            .template("{spinner:.magenta} {msg:.magenta}")
             .unwrap(),
     );
     s.set_message(msg.to_string());
-    s.enable_steady_tick(std::time::Duration::from_millis(120));
+    s.enable_steady_tick(std::time::Duration::from_millis(100));
     s
 }
 
