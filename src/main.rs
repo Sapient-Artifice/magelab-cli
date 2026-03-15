@@ -57,7 +57,7 @@ enum Commands {
     /// Authenticate with MageLab
     Login {
         /// Login method: google (default) or magic (email code)
-        #[arg(long, default_value = "google")]
+        #[arg(long, default_value = "magic")]
         method: String,
         /// Show current auth status instead of logging in
         #[arg(long)]

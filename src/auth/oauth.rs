@@ -65,9 +65,9 @@ const SIGNUP_URL: &str = "https://magelab.ai/signup";
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LoginMethod {
     /// Google OAuth via browser
-    #[default]
     Google,
-    /// Magic auth code via email
+    /// Magic auth code via email (default for CLI — no browser needed)
+    #[default]
     MagicAuth,
 }
 
@@ -141,9 +141,18 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
         let body = resp.text().await.unwrap_or_default();
         if body.contains("user_not_found") || status.as_u16() == 404 {
             print_warn(&format!("No MageLab account found for {}.", email));
-            print_warn(&format!("Create one at: {}", SIGNUP_URL));
-            print_status("Or sign in with Google: magelab login --method google");
-            anyhow::bail!("Account not found");
+            println!();
+            println!("  1) Sign in with Google (creates account automatically)");
+            println!("  2) Sign up at {}", SIGNUP_URL);
+            println!();
+            let choice = animated_prompt("Choose [1/2]:");
+            match choice.as_str() {
+                "1" | "" => return login_google(gateway_url).await,
+                _ => {
+                    print_status(&format!("Visit {} to create an account, then try again.", SIGNUP_URL));
+                    anyhow::bail!("Account not found");
+                }
+            }
         }
         anyhow::bail!("Failed to send magic auth code ({}): {}", status, body);
     }

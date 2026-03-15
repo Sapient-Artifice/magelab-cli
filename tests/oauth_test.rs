@@ -14,8 +14,8 @@ fn test_login_method_from_str() {
 }
 
 #[test]
-fn test_login_method_default_is_google() {
-    assert_eq!(LoginMethod::default(), LoginMethod::Google);
+fn test_login_method_default_is_magic_auth() {
+    assert_eq!(LoginMethod::default(), LoginMethod::MagicAuth);
 }
 
 #[test]
