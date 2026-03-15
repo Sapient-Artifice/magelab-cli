@@ -26,23 +26,23 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                "\x1b[38;5;141m🜁\x1b[0m",  // lavender
-                "\x1b[38;5;135m🜁\x1b[0m",  // purple
-                "\x1b[38;5;128m🜁\x1b[0m",  // med purple
-                "\x1b[38;5;93m🜁\x1b[0m",   // violet
-                "\x1b[38;5;57m🜂\x1b[0m",   // indigo
-                "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
-                "\x1b[38;5;55m🜂\x1b[0m",   // dark indigo
-                "\x1b[38;5;56m🜂\x1b[0m",   // deep indigo
-                "\x1b[38;5;91m🜃\x1b[0m",   // plum
-                "\x1b[38;5;93m🜃\x1b[0m",   // violet
-                "\x1b[38;5;128m🜃\x1b[0m",  // med purple
-                "\x1b[38;5;135m🜃\x1b[0m",  // purple
-                "\x1b[38;5;141m🜄\x1b[0m",  // lavender
-                "\x1b[38;5;177m🜄\x1b[0m",  // pink-purple
-                "\x1b[38;5;141m🜄\x1b[0m",  // lavender
-                "\x1b[38;5;135m🜄\x1b[0m",  // purple
-                "\x1b[38;5;141m🜁\x1b[0m",  // (finish)
+                "\x1b[38;5;141m🜁\x1b[0m",
+                "\x1b[38;5;135m🜁\x1b[0m",
+                "\x1b[38;5;128m🜂\x1b[0m",
+                "\x1b[38;5;93m🜂\x1b[0m",
+                "\x1b[38;5;57m🜃\x1b[0m",
+                "\x1b[38;5;55m🜃\x1b[0m",
+                "\x1b[38;5;57m🜄\x1b[0m",
+                "\x1b[38;5;91m🜄\x1b[0m",
+                "\x1b[38;5;93m🜁\x1b[0m",
+                "\x1b[38;5;128m🜁\x1b[0m",
+                "\x1b[38;5;135m🜂\x1b[0m",
+                "\x1b[38;5;141m🜂\x1b[0m",
+                "\x1b[38;5;177m🜃\x1b[0m",
+                "\x1b[38;5;141m🜃\x1b[0m",
+                "\x1b[38;5;135m🜄\x1b[0m",
+                "\x1b[38;5;128m🜄\x1b[0m",
+                "\x1b[38;5;141m🜁\x1b[0m",
             ])
             .template("{spinner} {msg}")
             .unwrap(),
