@@ -26,25 +26,25 @@ fn spinner(msg: &str) -> indicatif::ProgressBar {
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
             .tick_strings(&[
-                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // #8b5cf6 mage-500
-                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // mage-525
-                "\x1b[38;2;129;75;241m\x1b[49m🜁\x1b[0m",  // mage-550
-                "\x1b[38;2;124;58;237m\x1b[49m🜁\x1b[0m",  // #7c3aed mage-600
-                "\x1b[38;2;114;47;227m\x1b[49m🜁\x1b[0m",  // mage-650
-                "\x1b[38;2;109;40;217m\x1b[49m🜁\x1b[0m",  // #6d28d9 mage-700
-                "\x1b[38;2;104;71;229m\x1b[49m🜁\x1b[0m",  // → indigo
-                "\x1b[38;2;99;102;241m\x1b[49m🜁\x1b[0m",  // #6366f1 indigo-500
-                "\x1b[38;2;89;86;235m\x1b[49m🜁\x1b[0m",   // indigo-550
-                "\x1b[38;2;79;70;229m\x1b[49m🜁\x1b[0m",   // #4f46e5 indigo-600
-                "\x1b[38;2;89;86;235m\x1b[49m🜁\x1b[0m",   // indigo-550 (return)
-                "\x1b[38;2;99;102;241m\x1b[49m🜁\x1b[0m",  // #6366f1
-                "\x1b[38;2;104;71;229m\x1b[49m🜁\x1b[0m",  // → purple
-                "\x1b[38;2;109;40;217m\x1b[49m🜁\x1b[0m",  // #6d28d9
-                "\x1b[38;2;114;47;227m\x1b[49m🜁\x1b[0m",  // mage-650
-                "\x1b[38;2;124;58;237m\x1b[49m🜁\x1b[0m",  // #7c3aed
-                "\x1b[38;2;129;75;241m\x1b[49m🜁\x1b[0m",  // mage-550
-                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // mage-525
-                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // #8b5cf6 (finish)
+                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // Air      mage-500
+                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // Air      mage-525
+                "\x1b[38;2;129;75;241m\x1b[49m🜂\x1b[0m",  // Fire     mage-550
+                "\x1b[38;2;124;58;237m\x1b[49m🜂\x1b[0m",  // Fire     mage-600
+                "\x1b[38;2;114;47;227m\x1b[49m🜃\x1b[0m",  // Earth    mage-650
+                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",  // Earth    mage-700
+                "\x1b[38;2;104;71;229m\x1b[49m🜄\x1b[0m",  // Water    → indigo
+                "\x1b[38;2;99;102;241m\x1b[49m🜄\x1b[0m",  // Water    indigo-500
+                "\x1b[38;2;89;86;235m\x1b[49m🜁\x1b[0m",   // Air      indigo-550
+                "\x1b[38;2;79;70;229m\x1b[49m🜁\x1b[0m",   // Air      indigo-600
+                "\x1b[38;2;89;86;235m\x1b[49m🜂\x1b[0m",   // Fire     indigo-550
+                "\x1b[38;2;99;102;241m\x1b[49m🜂\x1b[0m",  // Fire     indigo-500
+                "\x1b[38;2;104;71;229m\x1b[49m🜃\x1b[0m",  // Earth    → purple
+                "\x1b[38;2;109;40;217m\x1b[49m🜃\x1b[0m",  // Earth    mage-700
+                "\x1b[38;2;114;47;227m\x1b[49m🜄\x1b[0m",  // Water    mage-650
+                "\x1b[38;2;124;58;237m\x1b[49m🜄\x1b[0m",  // Water    mage-600
+                "\x1b[38;2;129;75;241m\x1b[49m🜁\x1b[0m",  // Air      mage-550
+                "\x1b[38;2;134;83;243m\x1b[49m🜁\x1b[0m",  // Air      mage-525
+                "\x1b[38;2;139;92;246m\x1b[49m🜁\x1b[0m",  // Air      (finish)
             ])
             .template("{spinner} {msg:.magenta}")
             .unwrap(),
