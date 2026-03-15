@@ -18,10 +18,29 @@ use crate::render::stream::{print_status, print_success, print_warn};
 
 fn spinner(msg: &str) -> indicatif::ProgressBar {
     let s = indicatif::ProgressBar::new_spinner();
+    // Color-shifting alchemical spinner with occasional crystal ball / purple heart
+    // ANSI: 35=magenta, 95=bright magenta, 34=blue, 94=bright blue, 36=cyan
     s.set_style(
         indicatif::ProgressStyle::default_spinner()
-            .tick_strings(&["🜁", "🜂", "🜃", "🜄", "✦", "✧", "✦", "✧", "◈", "◇", "◈", "◇"])
-            .template("{spinner:.magenta} {msg:.magenta}")
+            .tick_strings(&[
+                "\x1b[35m🜁\x1b[0m",  // magenta
+                "\x1b[95m🜂\x1b[0m",  // bright magenta
+                "\x1b[34m🜃\x1b[0m",  // blue
+                "\x1b[94m🜄\x1b[0m",  // bright blue
+                "\x1b[35m✦\x1b[0m",   // magenta
+                "\x1b[95m✧\x1b[0m",   // bright magenta
+                "\x1b[34m◈\x1b[0m",   // blue
+                "\x1b[94m◇\x1b[0m",   // bright blue
+                "🔮",                  // crystal ball (native color)
+                "\x1b[35m✦\x1b[0m",   // magenta
+                "\x1b[95m🜁\x1b[0m",  // bright magenta
+                "\x1b[34m🜂\x1b[0m",  // blue
+                "\x1b[94m✧\x1b[0m",   // bright blue
+                "\x1b[35m◈\x1b[0m",   // magenta
+                "\x1b[95m◇\x1b[0m",   // bright magenta
+                "💜",                  // purple heart (native color)
+            ])
+            .template("{spinner} {msg:.magenta}")
             .unwrap(),
     );
     s.set_message(msg.to_string());
