@@ -79,18 +79,30 @@ pub fn animated_prompt(label: &str) -> String {
 
     let handle = std::thread::spawn(move || {
         let frames = [
+            // purple → white
+            "\x1b[38;5;93m▌\x1b[0m",   // violet
+            "\x1b[38;5;135m▌\x1b[0m",  // purple
+            "\x1b[38;5;141m▌\x1b[0m",  // lavender
+            "\x1b[38;5;183m▌\x1b[0m",  // light lavender
+            "\x1b[38;5;189m▌\x1b[0m",  // near-white purple
+            "\x1b[38;5;231m▌\x1b[0m",  // white
+            // white → purple
+            "\x1b[38;5;189m▌\x1b[0m",
+            "\x1b[38;5;183m▌\x1b[0m",
             "\x1b[38;5;141m▌\x1b[0m",
             "\x1b[38;5;135m▌\x1b[0m",
-            "\x1b[38;5;128m▌\x1b[0m",
-            "\x1b[38;5;93m▌\x1b[0m",
-            "\x1b[38;5;57m▌\x1b[0m",
+            "\x1b[38;5;93m▌\x1b[0m",   // violet
+            // purple → black
+            "\x1b[38;5;57m▌\x1b[0m",   // indigo
+            "\x1b[38;5;55m▌\x1b[0m",   // dark indigo
+            "\x1b[38;5;54m▌\x1b[0m",   // darker
+            "\x1b[38;5;17m▌\x1b[0m",   // near-black blue
+            "\x1b[38;5;16m▌\x1b[0m",   // black
+            // black → purple
+            "\x1b[38;5;17m▌\x1b[0m",
+            "\x1b[38;5;54m▌\x1b[0m",
             "\x1b[38;5;55m▌\x1b[0m",
             "\x1b[38;5;57m▌\x1b[0m",
-            "\x1b[38;5;91m▌\x1b[0m",
-            "\x1b[38;5;93m▌\x1b[0m",
-            "\x1b[38;5;128m▌\x1b[0m",
-            "\x1b[38;5;135m▌\x1b[0m",
-            "\x1b[38;5;177m▌\x1b[0m",
         ];
         let mut i = 0;
         while !stop_clone.load(Ordering::Relaxed) {
