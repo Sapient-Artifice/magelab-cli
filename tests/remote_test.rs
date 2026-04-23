@@ -7,14 +7,19 @@ fn test_remote_client_builds_auth_header() {
 }
 
 #[test]
-fn test_build_chat_body() {
-    let body = magelab_cli::client::remote::build_chat_body(
-        &[("user".into(), "hello".into())],
-        "gpt-4o",
-        true,
+fn test_remote_client_new_with_jwt() {
+    let client = RemoteClient::new(
+        "https://api.magelab.ai",
+        "eyJhbGciOiJSUzI1NiJ9.test",
     );
-    assert_eq!(body["model"], "gpt-4o");
-    assert_eq!(body["stream"], true);
-    assert_eq!(body["messages"][0]["role"], "user");
-    assert_eq!(body["messages"][0]["content"], "hello");
+    assert_eq!(client.gateway_url(), "https://api.magelab.ai");
+}
+
+#[test]
+fn test_remote_client_strips_trailing_slash() {
+    let client = RemoteClient::new(
+        "https://api.magelab.ai/",
+        "mage_test",
+    );
+    assert_eq!(client.gateway_url(), "https://api.magelab.ai");
 }
