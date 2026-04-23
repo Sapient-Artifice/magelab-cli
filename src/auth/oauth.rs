@@ -14,42 +14,13 @@ use workos::user_management::{
 use workos::{ApiKey, WorkOs};
 
 use super::credentials::Credentials;
-use crate::render::stream::{animated_prompt, print_status, print_success, print_warn};
 
-// 256-color gradient spinner using \x1b[38;5;Nm
-// Purple/indigo range in 256-color palette:
-//   129=bright purple, 128=purple, 127=deep purple,
-//   93=violet, 57=indigo, 56=deep indigo,
-//   92=dark purple, 91=plum
-fn spinner(msg: &str) -> indicatif::ProgressBar {
-    let s = indicatif::ProgressBar::new_spinner();
-    s.set_style(
-        indicatif::ProgressStyle::default_spinner()
-            .tick_strings(&[
-                "\x1b[38;5;141m🜁\x1b[0m",
-                "\x1b[38;5;135m🜁\x1b[0m",
-                "\x1b[38;5;128m🜂\x1b[0m",
-                "\x1b[38;5;93m🜂\x1b[0m",
-                "\x1b[38;5;57m🜃\x1b[0m",
-                "\x1b[38;5;55m🜃\x1b[0m",
-                "\x1b[38;5;57m🜄\x1b[0m",
-                "\x1b[38;5;91m🜄\x1b[0m",
-                "\x1b[38;5;93m🜁\x1b[0m",
-                "\x1b[38;5;128m🜁\x1b[0m",
-                "\x1b[38;5;135m🜂\x1b[0m",
-                "\x1b[38;5;141m🜂\x1b[0m",
-                "\x1b[38;5;177m🜃\x1b[0m",
-                "\x1b[38;5;141m🜃\x1b[0m",
-                "\x1b[38;5;135m🜄\x1b[0m",
-                "\x1b[38;5;128m🜄\x1b[0m",
-                "\x1b[38;5;141m🜁\x1b[0m",
-            ])
-            .template("{spinner} {msg}")
-            .unwrap(),
-    );
-    s.set_message(msg.to_string());
-    s.enable_steady_tick(std::time::Duration::from_millis(60));
-    s
+/// Prompt for user input from stdin
+fn prompt(label: &str) -> String {
+    eprint!("{} ", label);
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap_or_default();
+    input.trim().to_string()
 }
 
 /// WorkOS Client ID (shared with web frontend)
@@ -110,18 +81,23 @@ pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Resul
     }
 }
 
+/// Magic Auth login — public entry point
+pub async fn magic_login(gateway_url: &str) -> Result<Credentials> {
+    login_magic_auth(gateway_url).await
+}
+
 /// Magic Auth login flow — exchanges code through the gateway
 async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     let http = reqwest::Client::new();
     let cid = client_id();
 
-    let email = animated_prompt("Email:");
+    let email = prompt("Email:");
     if email.is_empty() {
         anyhow::bail!("Email is required");
     }
 
     // Send magic auth code via gateway
-    let sp = spinner(&format!("Sending login code to {}...", email));
+    eprintln!("Sending login code to {}...", email);
     let resp = http
         .post(format!(
             "{}/magic-auth",
@@ -134,22 +110,21 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
         .send()
         .await
         .context("Failed to send magic auth code")?;
-    sp.finish_and_clear();
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         if body.contains("user_not_found") || status.as_u16() == 404 {
-            print_warn(&format!("No MageLab account found for {}.", email));
+            eprintln!("No MageLab account found for {}.", email);
             println!();
             println!("  1) Sign in with Google (creates account automatically)");
             println!("  2) Sign up at {}", SIGNUP_URL);
             println!();
-            let choice = animated_prompt("Choose [1/2]:");
+            let choice = prompt("Choose [1/2]:");
             match choice.as_str() {
                 "1" | "" => return login_google(gateway_url).await,
                 _ => {
-                    print_status(&format!("Visit {} to create an account, then try again.", SIGNUP_URL));
+                    eprintln!("Visit {} to create an account, then try again.", SIGNUP_URL);
                     anyhow::bail!("Account not found");
                 }
             }
@@ -158,14 +133,14 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     }
 
     // Prompt for code
-    print_success("Code sent! Check your inbox.");
-    let code_input = animated_prompt("Code:");
+    eprintln!("Code sent! Check your inbox.");
+    let code_input = prompt("Code:");
     if code_input.is_empty() {
         anyhow::bail!("Code is required");
     }
 
     // Exchange magic auth code for tokens via gateway
-    let sp = spinner("Authenticating...");
+    eprintln!("Authenticating...");
     let creds = exchange_token(
         gateway_url,
         &serde_json::json!({
@@ -175,15 +150,13 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
             "client_id": cid,
         }),
     )
-    .await;
-    sp.finish_and_clear();
-    let creds = creds?;
+    .await?;
 
     creds.save()?;
     if let Some(ref email) = creds.email {
-        print_success(&format!("Logged in as {}!", email));
+        eprintln!("Logged in as {}!", email);
     }
-    print_status(&format!("Credentials saved to {}", Credentials::path()?.display()));
+    eprintln!("Credentials saved to {}", Credentials::path()?.display());
     Ok(creds)
 }
 
@@ -219,20 +192,19 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
         .get_authorization_url(&params)
         .context("Failed to build WorkOS authorization URL")?;
 
-    print_status("Opening browser for login...");
-    print_warn(&format!("If browser doesn't open, visit:\n{}\n", authorize_url));
+    eprintln!("Opening browser for login...");
+    eprintln!("If browser doesn't open, visit:\n{}\n", authorize_url);
     open::that(authorize_url.as_str()).ok();
 
-    let sp = spinner("Waiting for authentication...");
+    eprintln!("Waiting for authentication...");
     let (code, returned_state) = wait_for_callback(listener)?;
-    sp.finish_and_clear();
 
     if returned_state != state {
         anyhow::bail!("OAuth state mismatch — possible CSRF attack");
     }
 
     // Exchange code for tokens via gateway (NOT directly with WorkOS)
-    let sp = spinner("Exchanging authorization code...");
+    eprintln!("Exchanging authorization code...");
     let creds = exchange_token(
         gateway_url,
         &serde_json::json!({
@@ -243,15 +215,13 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
             "client_id": cid_str,
         }),
     )
-    .await;
-    sp.finish_and_clear();
-    let creds = creds?;
+    .await?;
 
     creds.save()?;
     if let Some(ref email) = creds.email {
-        print_success(&format!("Logged in as {}!", email));
+        eprintln!("Logged in as {}!", email);
     }
-    print_status(&format!("Credentials saved to {}", Credentials::path()?.display()));
+    eprintln!("Credentials saved to {}", Credentials::path()?.display());
     Ok(creds)
 }
 

@@ -124,24 +124,19 @@ impl Config {
             .or_else(|| self.api_key.clone())
     }
 
-    /// Returns true if remote mode requires setup (no API key configured)
-    pub fn needs_remote_setup(&self) -> bool {
-        self.api_key().is_none()
-    }
-
-    /// Interactive first-run setup: prompt for API key
-    pub fn run_first_setup(&mut self) -> Result<()> {
-        println!("Welcome to MageLab CLI!\n");
-        println!("Enter your API key (get one at magelab.ai/dashboard):");
-        let key = crate::render::stream::animated_prompt("API key:");
-
-        if key.is_empty() {
-            anyhow::bail!("No API key provided");
+    /// Set a config value by key name
+    pub fn set_value(&mut self, key: &str, value: &str) -> Result<()> {
+        match key {
+            "api_key" => self.api_key = Some(value.to_string()),
+            "default_model" => self.default_model = value.to_string(),
+            "magelab_home" => self.magelab_home = Some(value.to_string()),
+            "gateway_url" => self.gateway_url = value.to_string(),
+            "local_url" => self.local_url = value.to_string(),
+            "prefer" => self.prefer = value.to_string(),
+            "theme" => self.theme = value.to_string(),
+            "default_device" => self.default_device = Some(value.to_string()),
+            _ => anyhow::bail!("Unknown config key: {}", key),
         }
-
-        self.api_key = Some(key);
-        self.save()?;
-        println!("\nSaved to {}\n", Self::path()?.display());
         Ok(())
     }
 }
