@@ -26,7 +26,9 @@ fn test_config_set_value_rejects_unknown_key() {
 #[test]
 fn test_config_set_gateway_url() {
     let mut config = magelab_cli::config::Config::default();
-    config.set_value("gateway_url", "https://custom.api.com").unwrap();
+    config
+        .set_value("gateway_url", "https://custom.api.com")
+        .unwrap();
     assert_eq!(config.gateway_url, "https://custom.api.com");
 }
 

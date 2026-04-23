@@ -63,9 +63,8 @@ fn client_id() -> String {
 /// Override with MAGELAB_AUTH_URL for testing against the web app
 /// (e.g. MAGELAB_AUTH_URL=http://localhost:3007/api/auth)
 fn auth_base_url(gateway_url: &str) -> String {
-    std::env::var("MAGELAB_AUTH_URL").unwrap_or_else(|_| {
-        format!("{}/v1/auth", gateway_url.trim_end_matches('/'))
-    })
+    std::env::var("MAGELAB_AUTH_URL")
+        .unwrap_or_else(|_| format!("{}/v1/auth", gateway_url.trim_end_matches('/')))
 }
 
 /// Run the login flow using the default method (Google).
@@ -99,10 +98,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     // Send magic auth code via gateway
     eprintln!("Sending login code to {}...", email);
     let resp = http
-        .post(format!(
-            "{}/magic-auth",
-            auth_base_url(gateway_url)
-        ))
+        .post(format!("{}/magic-auth", auth_base_url(gateway_url)))
         .json(&serde_json::json!({
             "email": email,
             "client_id": cid,
@@ -227,10 +223,7 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
 
 /// Exchange a grant (auth code, refresh token, magic auth) for credentials
 /// via the gateway's /v1/auth/token endpoint.
-async fn exchange_token(
-    gateway_url: &str,
-    body: &serde_json::Value,
-) -> Result<Credentials> {
+async fn exchange_token(gateway_url: &str, body: &serde_json::Value) -> Result<Credentials> {
     let http = reqwest::Client::new();
     let url = format!("{}/token", auth_base_url(gateway_url));
 

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectionMode {
     Local,
@@ -10,6 +11,7 @@ pub enum ConnectionMode {
     Auto,
 }
 
+#[allow(dead_code)]
 impl ConnectionMode {
     pub fn from_flags(local: bool, remote: bool) -> Self {
         match (local, remote) {
@@ -21,6 +23,7 @@ impl ConnectionMode {
 }
 
 /// The resolved connection after auto-detection
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ResolvedConnection {
     /// Direct WebSocket to local backend (full tools)

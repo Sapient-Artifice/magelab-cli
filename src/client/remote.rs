@@ -17,6 +17,7 @@ impl RemoteClient {
         }
     }
 
+    #[allow(dead_code)]
     pub fn gateway_url(&self) -> &str {
         &self.gateway_url
     }
@@ -48,7 +49,8 @@ impl RemoteClient {
 
     /// Revoke an API key
     pub async fn revoke_key(&self, key_id: &str) -> Result<Value> {
-        self.post("/v1/revoke-api-key", &json!({"key_id": key_id})).await
+        self.post("/v1/revoke-api-key", &json!({"key_id": key_id}))
+            .await
     }
 
     async fn get(&self, path: &str) -> Result<Value> {
@@ -60,7 +62,9 @@ impl RemoteClient {
             .send()
             .await
             .with_context(|| format!("Request failed: GET {}", path))?;
-        resp.json().await.with_context(|| format!("Failed to parse response from {}", path))
+        resp.json()
+            .await
+            .with_context(|| format!("Failed to parse response from {}", path))
     }
 
     async fn post(&self, path: &str, body: &Value) -> Result<Value> {
@@ -73,6 +77,8 @@ impl RemoteClient {
             .send()
             .await
             .with_context(|| format!("Request failed: POST {}", path))?;
-        resp.json().await.with_context(|| format!("Failed to parse response from {}", path))
+        resp.json()
+            .await
+            .with_context(|| format!("Failed to parse response from {}", path))
     }
 }

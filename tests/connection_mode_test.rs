@@ -5,9 +5,18 @@ use tempfile::TempDir;
 
 #[test]
 fn test_connection_mode_from_flags() {
-    assert_eq!(ConnectionMode::from_flags(true, false), ConnectionMode::Local);
-    assert_eq!(ConnectionMode::from_flags(false, true), ConnectionMode::Remote);
-    assert_eq!(ConnectionMode::from_flags(false, false), ConnectionMode::Auto);
+    assert_eq!(
+        ConnectionMode::from_flags(true, false),
+        ConnectionMode::Local
+    );
+    assert_eq!(
+        ConnectionMode::from_flags(false, true),
+        ConnectionMode::Remote
+    );
+    assert_eq!(
+        ConnectionMode::from_flags(false, false),
+        ConnectionMode::Auto
+    );
 }
 
 #[test]
@@ -57,8 +66,7 @@ fn test_credentials_with_email_parses() {
         "user_id": "user_123",
         "email": "dev@magelab.ai"
     }"#;
-    let creds: magelab_cli::auth::credentials::Credentials =
-        serde_json::from_str(json).unwrap();
+    let creds: magelab_cli::auth::credentials::Credentials = serde_json::from_str(json).unwrap();
     assert_eq!(creds.email.as_deref(), Some("dev@magelab.ai"));
     assert!(creds.has_token());
     assert!(creds.is_token_valid());
@@ -70,8 +78,7 @@ fn test_credentials_expired_token() {
         "access_token": "jwt_tok",
         "expires_at": 1000
     }"#;
-    let creds: magelab_cli::auth::credentials::Credentials =
-        serde_json::from_str(json).unwrap();
+    let creds: magelab_cli::auth::credentials::Credentials = serde_json::from_str(json).unwrap();
     assert!(creds.has_token());
     assert!(!creds.is_token_valid()); // expired long ago
 }
@@ -79,8 +86,17 @@ fn test_credentials_expired_token() {
 #[test]
 fn test_login_method_parsing() {
     use magelab_cli::auth::oauth::LoginMethod;
-    assert_eq!("google".parse::<LoginMethod>().unwrap(), LoginMethod::Google);
-    assert_eq!("magic".parse::<LoginMethod>().unwrap(), LoginMethod::MagicAuth);
-    assert_eq!("email".parse::<LoginMethod>().unwrap(), LoginMethod::MagicAuth);
+    assert_eq!(
+        "google".parse::<LoginMethod>().unwrap(),
+        LoginMethod::Google
+    );
+    assert_eq!(
+        "magic".parse::<LoginMethod>().unwrap(),
+        LoginMethod::MagicAuth
+    );
+    assert_eq!(
+        "email".parse::<LoginMethod>().unwrap(),
+        LoginMethod::MagicAuth
+    );
     assert!("unknown".parse::<LoginMethod>().is_err());
 }
