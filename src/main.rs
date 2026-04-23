@@ -27,8 +27,8 @@ struct Cli {
 enum Commands {
     /// Authenticate with MageLab
     Login {
-        /// Login method: google or magic (email code)
-        #[arg(long, default_value = "magic")]
+        /// Login method: web (browser), google, or magic (email code)
+        #[arg(long, default_value = "web")]
         method: String,
         /// Show current auth status
         #[arg(long)]
@@ -161,17 +161,9 @@ async fn main() -> Result<()> {
 }
 
 async fn cmd_login(config: &Config, method: &str) -> Result<()> {
-    match method {
-        "google" => {
-            auth::oauth::login(&config.gateway_url).await?;
-            Ok(())
-        }
-        "magic" => {
-            auth::oauth::magic_login(&config.gateway_url).await?;
-            Ok(())
-        }
-        _ => anyhow::bail!("Unknown login method: {}. Use 'google' or 'magic'.", method),
-    }
+    let m: auth::oauth::LoginMethod = method.parse()?;
+    auth::oauth::login_with_method(&config.gateway_url, &m).await?;
+    Ok(())
 }
 
 async fn cmd_login_status(config: &Config) -> Result<()> {

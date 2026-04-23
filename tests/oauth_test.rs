@@ -10,12 +10,17 @@ fn test_login_method_from_str() {
         "magic".parse::<LoginMethod>().unwrap(),
         LoginMethod::MagicAuth
     );
+    assert_eq!("web".parse::<LoginMethod>().unwrap(), LoginMethod::Web);
+    assert_eq!(
+        "browser".parse::<LoginMethod>().unwrap(),
+        LoginMethod::Web
+    );
     assert!("invalid".parse::<LoginMethod>().is_err());
 }
 
 #[test]
-fn test_login_method_default_is_magic_auth() {
-    assert_eq!(LoginMethod::default(), LoginMethod::MagicAuth);
+fn test_login_method_default_is_web() {
+    assert_eq!(LoginMethod::default(), LoginMethod::Web);
 }
 
 #[test]

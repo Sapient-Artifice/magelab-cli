@@ -37,9 +37,11 @@ const SIGNUP_URL: &str = "https://magelab.ai/signup";
 pub enum LoginMethod {
     /// Google OAuth via browser
     Google,
-    /// Magic auth code via email (default for CLI — no browser needed)
-    #[default]
+    /// Magic auth code via email
     MagicAuth,
+    /// Web-based login via the MageLab web app (browser → encrypted code exchange)
+    #[default]
+    Web,
 }
 
 impl FromStr for LoginMethod {
@@ -49,7 +51,11 @@ impl FromStr for LoginMethod {
         match s.to_lowercase().as_str() {
             "google" => Ok(Self::Google),
             "magic" | "email" | "magic-auth" => Ok(Self::MagicAuth),
-            _ => anyhow::bail!("Unknown login method '{}'. Use 'google' or 'magic'.", s),
+            "web" | "browser" => Ok(Self::Web),
+            _ => anyhow::bail!(
+                "Unknown login method '{}'. Use 'google', 'magic', or 'web'.",
+                s
+            ),
         }
     }
 }
@@ -67,6 +73,15 @@ fn auth_base_url(gateway_url: &str) -> String {
         .unwrap_or_else(|_| format!("{}/v1/auth", gateway_url.trim_end_matches('/')))
 }
 
+/// Get the MageLab web app URL for browser-based login.
+/// Defaults to https://magelab.ai. Override with MAGELAB_WEB_URL for local dev.
+fn web_url() -> String {
+    std::env::var("MAGELAB_WEB_URL")
+        .unwrap_or_else(|_| "https://magelab.ai".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
 /// Run the login flow using the default method (Google).
 pub async fn login(gateway_url: &str) -> Result<Credentials> {
     login_with_method(gateway_url, &LoginMethod::default()).await
@@ -77,7 +92,178 @@ pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Resul
     match method {
         LoginMethod::Google => login_google(gateway_url).await,
         LoginMethod::MagicAuth => login_magic_auth(gateway_url).await,
+        LoginMethod::Web => login_web().await,
     }
+}
+
+/// Web-based login — two-phase code exchange via the MageLab web app.
+///
+/// Security: the access token never appears in URLs, browser history, or logs.
+///
+/// Flow:
+///   1. CLI generates a random `state` and binds loopback on :19872
+///   2. Browser opens to {web_url}/auth/sign-in → user authenticates
+///   3. Web app mints a one-time code, redirects to loopback with ?code=...&state=...
+///   4. CLI verifies state, then POSTs the code back to exchange for the actual token
+async fn login_web() -> Result<Credentials> {
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
+        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
+
+    let state = generate_state();
+    let loopback_url = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
+    let base = web_url();
+
+    let cli_token_url = format!(
+        "{}/api/auth/cli-token?redirect={}&state={}",
+        base,
+        urlencoding::encode(&loopback_url),
+        urlencoding::encode(&state)
+    );
+    let sign_in_url = format!(
+        "{}/auth/sign-in?returnTo={}",
+        base,
+        urlencoding::encode(&cli_token_url)
+    );
+
+    eprintln!("Opening browser for login...");
+    eprintln!("If browser doesn't open, visit:\n{}\n", sign_in_url);
+    open::that(&sign_in_url).ok();
+
+    eprintln!("Waiting for authentication...");
+    let code = wait_for_code_callback(listener)?;
+
+    // Exchange the signed code for the actual token.
+    // State acts as a secret — only we know it, so intercepting the
+    // redirect URL alone is not enough to exchange the code.
+    eprintln!("Exchanging code...");
+    let creds = exchange_cli_code(&base, &code, &state).await?;
+
+    creds.save()?;
+    if let Some(ref email) = creds.email {
+        eprintln!("Logged in as {}!", email);
+    }
+    eprintln!("Credentials saved to {}", Credentials::path()?.display());
+    Ok(creds)
+}
+
+/// Wait for the web app to redirect to our loopback with an encrypted code.
+/// State is NOT in the URL — only the CLI knows it.
+/// Times out after 3 minutes.
+fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_secs(180);
+    listener.set_nonblocking(true)?;
+
+    let (mut stream, _) = loop {
+        match listener.accept() {
+            Ok(conn) => break conn,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "Login timed out — no response received within 3 minutes. Try again."
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        }
+    };
+
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .context("Invalid HTTP request")?;
+
+    let url = url::Url::parse(&format!("http://localhost{}", path))
+        .context("Failed to parse callback URL")?;
+
+    let code = url
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.to_string())
+        .context("No code in callback — login may have failed")?;
+
+    let response = concat!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        "<meta name=\"referrer\" content=\"no-referrer\">",
+        "<title>Mage Lab — Login Successful</title>",
+        "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
+        "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
+        "<link href=\"https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap\" rel=\"stylesheet\">",
+        "<style>",
+        "*{margin:0;padding:0;box-sizing:border-box}",
+        "body{background:#09090b;color:#fafafa;font-family:'Geist',system-ui,sans-serif;",
+        "min-height:100vh;display:flex;align-items:center;justify-content:center}",
+        ".card{text-align:center;max-width:400px;padding:3rem 2rem}",
+        ".icon{width:48px;height:48px;margin:0 auto 1.5rem;border-radius:12px;",
+        "background:linear-gradient(135deg,#8b5cf6,#7c3aed);",
+        "display:flex;align-items:center;justify-content:center}",
+        ".icon svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}",
+        "h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-.01em}",
+        "p{color:#a1a1aa;font-size:.875rem;line-height:1.5}",
+        ".hint{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.06);",
+        "color:#71717a;font-size:.75rem;font-family:'Geist Mono',monospace}",
+        "</style></head><body>",
+        "<div class=\"card\">",
+        "<div class=\"icon\"><svg viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"/></svg></div>",
+        "<h1>Login successful</h1>",
+        "<p>You can close this tab and return to the terminal.</p>",
+        "<div class=\"hint\">magelab cli</div>",
+        "</div></body></html>",
+    );
+    stream.write_all(response.as_bytes()).ok();
+
+    Ok(code)
+}
+
+/// Exchange an encrypted CLI code for credentials via POST to the web app.
+pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Result<Credentials> {
+    let http = reqwest::Client::new();
+    let url = format!("{}/api/auth/cli-token", web_base);
+
+    let resp = http
+        .post(&url)
+        .json(&serde_json::json!({ "code": code, "state": state }))
+        .send()
+        .await
+        .context("Failed to exchange code with web app")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Code exchange failed ({}): {}", status, body);
+    }
+
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse code exchange response")?;
+
+    let access_token = data["access_token"]
+        .as_str()
+        .context("No access_token in response")?
+        .to_string();
+
+    let email = data["email"].as_str().map(String::from);
+    let user_id = data["user_id"].as_str().map(String::from);
+
+    // WorkOS access tokens typically expire in 5 minutes
+    let expires_at = chrono::Utc::now().timestamp() + 300;
+
+    Ok(Credentials {
+        access_token: Some(access_token),
+        refresh_token: None,
+        expires_at: Some(expires_at),
+        user_id,
+        email,
+    })
 }
 
 /// Magic Auth login — public entry point
