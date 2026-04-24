@@ -51,8 +51,14 @@ async fn test_refresh_token_exchange() {
         .await
         .expect("refresh_token should succeed against mock");
 
-    assert_eq!(creds.access_token.as_deref(), Some("test_access_token_abc123"));
-    assert_eq!(creds.refresh_token.as_deref(), Some("test_refresh_token_xyz789"));
+    assert_eq!(
+        creds.access_token.as_deref(),
+        Some("test_access_token_abc123")
+    );
+    assert_eq!(
+        creds.refresh_token.as_deref(),
+        Some("test_refresh_token_xyz789")
+    );
     assert_eq!(creds.email.as_deref(), Some("max@magelab.ai"));
     assert_eq!(creds.user_id.as_deref(), Some("user_01TEST"));
     assert!(creds.is_token_valid(), "fresh token should be valid");
@@ -189,8 +195,7 @@ async fn test_cli_code_exchange_success() {
         .and(body_string_contains("test_code_abc"))
         .and(body_string_contains("test_state_123"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(cli_token_response("max@magelab.ai")),
+            ResponseTemplate::new(200).set_body_json(cli_token_response("max@magelab.ai")),
         )
         .expect(1)
         .mount(&mock_server)
@@ -223,8 +228,7 @@ async fn test_cli_code_exchange_invalid_code() {
         .mount(&mock_server)
         .await;
 
-    let result =
-        oauth::exchange_cli_code(&mock_server.uri(), "bad_code", "some_state").await;
+    let result = oauth::exchange_cli_code(&mock_server.uri(), "bad_code", "some_state").await;
 
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
@@ -249,8 +253,7 @@ async fn test_cli_code_exchange_state_mismatch() {
         .mount(&mock_server)
         .await;
 
-    let result =
-        oauth::exchange_cli_code(&mock_server.uri(), "some_code", "wrong_state").await;
+    let result = oauth::exchange_cli_code(&mock_server.uri(), "some_code", "wrong_state").await;
 
     assert!(result.is_err());
 }
@@ -283,8 +286,7 @@ async fn test_cli_code_exchange_missing_token_field() {
         .mount(&mock_server)
         .await;
 
-    let result =
-        oauth::exchange_cli_code(&mock_server.uri(), "code", "state").await;
+    let result = oauth::exchange_cli_code(&mock_server.uri(), "code", "state").await;
 
     assert!(result.is_err(), "should fail when access_token is missing");
 }
