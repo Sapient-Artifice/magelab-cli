@@ -5,6 +5,7 @@ import { getConnection } from "./connection.js";
 import { BackendSocket, type ConfirmationRequest } from "./websocket.js";
 import { registerBackendTools } from "./tools.js";
 import { ensureGatewayProvider } from "./gateway.js";
+import { registerCommands } from "./commands.js";
 import { isAllowedUrl, isAllowedFilepath } from "./validation.js";
 
 /** Read auto_approve list from magelab CLI config */
@@ -30,6 +31,21 @@ function loadAutoApproveList(): Set<string> {
 }
 
 export default async function (pi: any) {
+  // 0. Register MageLab skill directories with Pi (no backend needed)
+  pi.on("resources_discover", (_event: unknown, _ctx: any) => {
+    const skillPaths: string[] = [];
+    const userSkills = join(homedir(), "Mage", "Skills");
+    if (existsSync(userSkills)) skillPaths.push(userSkills);
+
+    // Project-scoped skills (cwd/.claude/skills/)
+    try {
+      const projectSkills = join(process.cwd(), ".claude", "skills");
+      if (existsSync(projectSkills)) skillPaths.push(projectSkills);
+    } catch { /* cwd may not be accessible */ }
+
+    return { skillPaths };
+  });
+
   // 1. Configure MageLab Gateway as a Pi provider (if logged in)
   try {
     await ensureGatewayProvider();
@@ -175,7 +191,36 @@ export default async function (pi: any) {
     return;
   }
 
-  // 8. Activate only the MageLab tools we just registered on session start.
+  // 8. Register /magelab command and skill slash commands
+  const commandCount = registerCommands(pi, socket);
+
+  // 8b. Stream backend agent responses to Pi
+  socket.on("assistant_stream", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    if (msg.phase === "start") {
+      sessionCtx.ui.setStatus("magelab-agent", "MageLab agent responding...");
+    } else if (msg.phase === "end") {
+      sessionCtx.ui.setStatus("magelab-agent", undefined);
+    }
+  });
+
+  socket.on("assistant", (msg: any) => {
+    if (!sessionCtx?.hasUI || !msg.text) return;
+    // Display the backend agent's response as a Pi message
+    pi.sendMessage({
+      customType: "magelab-agent",
+      content: msg.text,
+      display: true,
+    });
+    sessionCtx.ui.setStatus("magelab-agent", undefined);
+  });
+
+  socket.on("assistant_complete", () => {
+    if (!sessionCtx?.hasUI) return;
+    sessionCtx.ui.setStatus("magelab-agent", undefined);
+  });
+
+  // 9. Activate only the MageLab tools we just registered on session start.
 
   pi.on("session_start", async (_event: unknown, ctx: any) => {
     sessionCtx = ctx;
@@ -189,7 +234,10 @@ export default async function (pi: any) {
       // Tools registered but activation failed — they'll still appear in getAllTools
     }
     if (ctx.hasUI) {
-      ctx.ui.notify(`MageLab: ${toolCount} tools active (${conn.mode})`, "info");
+      ctx.ui.notify(
+        `MageLab: ${toolCount} tools, ${commandCount} commands (${conn.mode})`,
+        "info"
+      );
 
       // Proactive balance check — warn if low or zero
       try {
