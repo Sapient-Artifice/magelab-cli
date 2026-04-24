@@ -468,7 +468,7 @@ async fn exchange_token(gateway_url: &str, body: &serde_json::Value) -> Result<C
 
 fn generate_code_verifier() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -479,7 +479,7 @@ fn generate_code_challenge(verifier: &str) -> String {
 
 fn generate_state() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..16).map(|_| rng.gen()).collect();
+    let bytes: Vec<u8> = (0..16).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
