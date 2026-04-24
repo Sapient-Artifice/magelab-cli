@@ -1,12 +1,12 @@
-#[cfg(target_os = "macos")]
-mod macos;
 #[cfg(not(target_os = "macos"))]
 mod fallback;
-
 #[cfg(target_os = "macos")]
-use macos as platform;
+mod macos;
+
 #[cfg(not(target_os = "macos"))]
 use fallback as platform;
+#[cfg(target_os = "macos")]
+use macos as platform;
 
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};

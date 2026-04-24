@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use core_foundation::base::{CFType, TCFType, kCFAllocatorDefault};
+use core_foundation::base::{kCFAllocatorDefault, CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::data::CFData;
 use core_foundation::dictionary::CFMutableDictionary;
@@ -48,10 +48,8 @@ pub fn prompt_biometric(reason: &str) -> Result<()> {
                 let code = unsafe { NSError::code(&*error) };
                 match code {
                     -2 => "Touch ID verification cancelled.".to_string(),
-                    -8 => {
-                        "Touch ID is locked. Use your device passcode to unlock, then try again."
-                            .to_string()
-                    }
+                    -8 => "Touch ID is locked. Use your device passcode to unlock, then try again."
+                        .to_string(),
                     _ => format!("Touch ID verification failed (code {}).", code),
                 }
             };
@@ -153,9 +151,7 @@ pub fn load_biometric_item() -> Result<Option<String>> {
             }
             s if s == errSecItemNotFound => Ok(None),
             s if s == errSecAuthFailed => {
-                eprintln!(
-                    "Touch ID enrollment changed. Please log in again: magelab login"
-                );
+                eprintln!("Touch ID enrollment changed. Please log in again: magelab login");
                 Ok(None)
             }
             _ => {
