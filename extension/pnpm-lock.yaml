@@ -11,6 +11,9 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.49
         version: 0.34.49
+      partysocket:
+        specifier: ^1.1.18
+        version: 1.1.18
       ws:
         specifier: ^8.18.0
         version: 8.20.0
@@ -398,6 +401,9 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
+  event-target-polyfill@0.0.4:
+    resolution: {integrity: sha512-Gs6RLjzlLRdT8X9ZipJdIZI/Y6/HhRLyq9RdDlCsnpxr/+Nn6bU2EFGuC94GjxqhM+Nmij2Vcq98yoHrU8uNFQ==}
+
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
@@ -432,6 +438,14 @@ packages:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
+
+  partysocket@1.1.18:
+    resolution: {integrity: sha512-SyuvH9VavWOSa14v6dYdp3yfSUDII4BQB1+TkGOFBkjfZKjnDBiba4fhdhwBlqGBkqw4ea3gTA1DYhSffX24Wg==}
+    peerDependencies:
+      react: '>=17'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
@@ -865,6 +879,8 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
 
+  event-target-polyfill@0.0.4: {}
+
   expect-type@1.3.0: {}
 
   fdir@6.5.0(picomatch@4.0.4):
@@ -885,6 +901,10 @@ snapshots:
   ms@2.1.3: {}
 
   nanoid@3.3.11: {}
+
+  partysocket@1.1.18:
+    dependencies:
+      event-target-polyfill: 0.0.4
 
   pathe@2.0.3: {}
 

@@ -46,6 +46,19 @@ export default async function (pi: any) {
     });
   });
 
+  // 4b. Notify user on connection state changes (reconnect/disconnect)
+  let sessionCtx: any = null;
+  socket.onStateChange((state) => {
+    if (!sessionCtx?.hasUI) return;
+    if (state === "reconnecting") {
+      sessionCtx.ui.notify("MageLab backend disconnected — reconnecting...", "warning");
+    } else if (state === "connected") {
+      sessionCtx.ui.notify("MageLab backend reconnected", "info");
+    } else if (state === "disconnected") {
+      sessionCtx.ui.notify("MageLab backend disconnected. Restart Pi to reconnect.", "error");
+    }
+  });
+
   // 5. Fetch and register backend tools
   let toolCount: number;
   try {
@@ -57,6 +70,7 @@ export default async function (pi: any) {
 
   // 6. Activate extension tools on session start (can't call setActiveTools during loading)
   pi.on("session_start", async (_event: unknown, ctx: any) => {
+    sessionCtx = ctx;
     try {
       const active = pi.getActiveTools();
       const all = pi.getAllTools();

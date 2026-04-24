@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { BackendSocket } from "../src/websocket.js";
 import { MockBackend } from "./mock-backend.js";
 
 let backend: MockBackend;
+let cleanup: (() => void)[] = [];
 
 beforeAll(async () => {
   backend = new MockBackend();
@@ -11,6 +12,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await backend.close();
+});
+
+afterEach(() => {
+  for (const fn of cleanup) fn();
+  cleanup = [];
 });
 
 describe("BackendSocket", () => {
@@ -136,5 +142,19 @@ describe("BackendSocket", () => {
 
     socket.close();
     await confirmBackend.close();
+  });
+
+  it("reports state changes via onStateChange", async () => {
+    const socket = await BackendSocket.connect(backend.url);
+    cleanup.push(() => socket.close());
+
+    const states: string[] = [];
+    socket.onStateChange((s) => states.push(s));
+
+    expect(socket.state).toBe("connected");
+
+    // Intentional close
+    socket.close();
+    expect(socket.state).toBe("disconnected");
   });
 });
