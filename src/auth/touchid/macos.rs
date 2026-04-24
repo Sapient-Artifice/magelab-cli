@@ -1,23 +1,186 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use core_foundation::base::{CFType, TCFType, kCFAllocatorDefault};
+use core_foundation::boolean::CFBoolean;
+use core_foundation::data::CFData;
+use core_foundation::dictionary::CFMutableDictionary;
+use core_foundation::string::CFString;
+use security_framework_sys::access_control::*;
+use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
+use security_framework_sys::item::*;
+use security_framework_sys::keychain_item::*;
+use std::ptr;
+
+const KEYCHAIN_SERVICE: &str = "magelab-cli";
+const KEYCHAIN_ACCOUNT: &str = "refresh-bio";
 
 /// Check if Touch ID hardware is available via LAContext
 pub fn is_hardware_available() -> bool {
-    // TODO: implement with LAContext in Task 4
-    false
+    use objc2_local_authentication::LAContext;
+
+    let context = unsafe { LAContext::new() };
+    unsafe {
+        context
+            .canEvaluatePolicy_error(
+                objc2_local_authentication::LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+            )
+            .is_ok()
+    }
 }
 
-pub fn prompt_biometric(_reason: &str) -> Result<()> {
+/// Prompt the user with a standalone Touch ID dialog via LAContext
+pub fn prompt_biometric(reason: &str) -> Result<()> {
+    use objc2::runtime::Bool;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_local_authentication::{LAContext, LAPolicy};
+
+    let context = unsafe { LAContext::new() };
+    let reason_ns = NSString::from_str(reason);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let block = block2::RcBlock::new(move |success: Bool, error: *mut NSError| {
+        if success.as_bool() {
+            tx.send(Ok(())).ok();
+        } else {
+            let msg = if error.is_null() {
+                "Touch ID verification failed.".to_string()
+            } else {
+                let code = unsafe { NSError::code(&*error) };
+                match code {
+                    -2 => "Touch ID verification cancelled.".to_string(),
+                    -8 => {
+                        "Touch ID is locked. Use your device passcode to unlock, then try again."
+                            .to_string()
+                    }
+                    _ => format!("Touch ID verification failed (code {}).", code),
+                }
+            };
+            tx.send(Err(anyhow::anyhow!("{}", msg))).ok();
+        }
+    });
+
+    unsafe {
+        context.evaluatePolicy_localizedReason_reply(
+            LAPolicy::DeviceOwnerAuthenticationWithBiometrics,
+            &reason_ns,
+            &block,
+        );
+    }
+
+    rx.recv().context("Touch ID callback not received")?
+}
+
+/// Helper to create a keychain query dictionary with the correct types.
+unsafe fn base_query() -> CFMutableDictionary<CFString, CFType> {
+    let mut query = CFMutableDictionary::<CFString, CFType>::new();
+    query.add(
+        &CFString::wrap_under_get_rule(kSecClass),
+        &CFType::wrap_under_get_rule(kSecClassGenericPassword as *const _),
+    );
+    query.add(
+        &CFString::wrap_under_get_rule(kSecAttrService),
+        &CFString::from_static_string(KEYCHAIN_SERVICE).as_CFType(),
+    );
+    query.add(
+        &CFString::wrap_under_get_rule(kSecAttrAccount),
+        &CFString::from_static_string(KEYCHAIN_ACCOUNT).as_CFType(),
+    );
+    query
+}
+
+/// Store a refresh token in a biometric-protected Keychain item
+pub fn store_biometric_item(token: &str) -> Result<()> {
+    // Delete any existing item first (ignore errors)
+    delete_biometric_item().ok();
+
+    unsafe {
+        let mut error: *mut core_foundation_sys::error::CFErrorRef = ptr::null_mut();
+        let access_control = SecAccessControlCreateWithFlags(
+            kCFAllocatorDefault,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly as *const _,
+            kSecAccessControlBiometryCurrentSet,
+            &mut error as *mut _ as *mut _,
+        );
+
+        if access_control.is_null() {
+            anyhow::bail!("Failed to create access control for biometric Keychain item");
+        }
+
+        let mut query = base_query();
+        query.add(
+            &CFString::wrap_under_get_rule(kSecValueData),
+            &CFData::from_buffer(token.as_bytes()).as_CFType(),
+        );
+        query.add(
+            &CFString::wrap_under_get_rule(kSecAttrAccessControl),
+            &CFType::wrap_under_create_rule(access_control as *const _),
+        );
+
+        let status = SecItemAdd(query.as_concrete_TypeRef() as _, ptr::null_mut());
+
+        if status != errSecSuccess {
+            anyhow::bail!(
+                "Failed to store biometric Keychain item (OSStatus {})",
+                status
+            );
+        }
+    }
+
     Ok(())
 }
 
-pub fn store_biometric_item(_token: &str) -> Result<()> {
-    Ok(())
-}
-
+/// Load refresh token from biometric-protected Keychain item (triggers Touch ID)
 pub fn load_biometric_item() -> Result<Option<String>> {
-    Ok(None)
+    unsafe {
+        let mut query = base_query();
+        query.add(
+            &CFString::wrap_under_get_rule(kSecReturnData),
+            &CFBoolean::true_value().as_CFType(),
+        );
+
+        let mut result: core_foundation_sys::base::CFTypeRef = ptr::null_mut();
+        let status = SecItemCopyMatching(query.as_concrete_TypeRef() as _, &mut result);
+
+        match status {
+            s if s == errSecSuccess => {
+                if result.is_null() {
+                    return Ok(None);
+                }
+                let data = CFData::wrap_under_create_rule(result as _);
+                let token = String::from_utf8(data.bytes().to_vec())
+                    .context("Biometric Keychain item is not valid UTF-8")?;
+                Ok(Some(token))
+            }
+            s if s == errSecItemNotFound => Ok(None),
+            s if s == errSecAuthFailed => {
+                eprintln!(
+                    "Touch ID enrollment changed. Please log in again: magelab login"
+                );
+                Ok(None)
+            }
+            _ => {
+                anyhow::bail!(
+                    "Failed to read biometric Keychain item (OSStatus {})",
+                    status
+                );
+            }
+        }
+    }
 }
 
+/// Delete biometric Keychain item
 pub fn delete_biometric_item() -> Result<()> {
+    unsafe {
+        let query = base_query();
+        let status = SecItemDelete(query.as_concrete_TypeRef() as _);
+
+        if status != errSecSuccess && status != errSecItemNotFound {
+            anyhow::bail!(
+                "Failed to delete biometric Keychain item (OSStatus {})",
+                status
+            );
+        }
+    }
+
     Ok(())
 }
