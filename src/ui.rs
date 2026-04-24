@@ -114,12 +114,10 @@ pub fn animated_prompt(label: &str) -> String {
                         println!();
                         break;
                     }
-                    KeyCode::Backspace => {
-                        if !input.is_empty() {
-                            input.pop();
-                            print!("\x1b[1D \x1b[1D");
-                            io::stdout().flush().ok();
-                        }
+                    KeyCode::Backspace if !input.is_empty() => {
+                        input.pop();
+                        print!("\x1b[1D \x1b[1D");
+                        io::stdout().flush().ok();
                     }
                     KeyCode::Char(c) => {
                         if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {

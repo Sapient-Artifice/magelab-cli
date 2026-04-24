@@ -61,6 +61,56 @@ magelab config                 # Show current config and file path
 magelab config set <key> <val> # Set a config value
 ```
 
+## Pi Extension
+
+The CLI includes `@magelab/agent`, a [Pi coding agent](https://github.com/badlogic/pi-mono) extension that bridges MageLab backend tools (python, web search, image generation, subagents, etc.) into Pi.
+
+### Quickstart
+
+```bash
+# 1. One command installs everything (Pi + extension + dependencies)
+magelab setup-pi
+
+# 2. Start MageLab backend (if not already running)
+magelab launch --wait
+
+# 3. Start Pi — MageLab tools auto-register
+pi
+
+# 4. Try a MageLab tool in Pi
+#    "use run_python to calculate fibonacci(20)"
+#    "use search_web to find Rust async patterns"
+```
+
+`setup-pi` will install Pi (via pnpm/npm) if it's not already installed, embed the extension files into `~/.pi/agent/extensions/magelab-agent/`, and install dependencies. Pi auto-discovers extensions from this directory.
+
+### Manual Setup
+
+If you prefer to link the extension from the repo source:
+
+```bash
+# Install Pi
+pnpm install -g @mariozechner/pi-coding-agent
+
+# Install extension dependencies
+cd extension && pnpm install && cd ..
+
+# Symlink into Pi's extension directory
+mkdir -p ~/.pi/agent/extensions
+ln -s "$(pwd)/extension" ~/.pi/agent/extensions/magelab-agent
+```
+
+### Managing the Extension
+
+```bash
+magelab setup-pi               # Install/reinstall
+magelab setup-pi --uninstall   # Remove extension
+```
+
+### How It Works
+
+On Pi startup, the extension calls `magelab connect --json --no-launch` to find the backend, opens a WebSocket, and registers all non-native backend tools with Pi. Tools like `read_file`, `write_file`, and `run_bash` are skipped (Pi handles those natively).
+
 ## Configuration
 
 Config file: `~/.config/magelab/cli.toml`

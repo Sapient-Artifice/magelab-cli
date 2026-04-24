@@ -41,6 +41,16 @@ pub enum OutgoingMessage {
 
     #[serde(rename = "control")]
     Control { action: String },
+
+    #[serde(rename = "get_tools")]
+    GetTools,
+
+    #[serde(rename = "tool_call")]
+    ToolCall {
+        call_id: String,
+        function_name: String,
+        arguments: HashMap<String, Value>,
+    },
 }
 
 /// Messages received from backend via WebSocket
@@ -220,6 +230,23 @@ pub enum IncomingMessage {
         code: String,
         #[serde(default)]
         message: String,
+    },
+
+    #[serde(rename = "tools_list")]
+    ToolsList {
+        #[serde(default)]
+        tools: Vec<Value>,
+    },
+
+    #[serde(rename = "tool_call_result")]
+    ToolCallResult {
+        call_id: String,
+        #[serde(default)]
+        success: bool,
+        #[serde(default)]
+        result: Option<Value>,
+        #[serde(default)]
+        error: Option<String>,
     },
 
     #[serde(rename = "ping")]
