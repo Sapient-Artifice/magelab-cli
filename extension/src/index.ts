@@ -404,7 +404,7 @@ export default async function (pi: any) {
               });
 
               socket.on("tool_debug", (msg: any) => {
-                if (sessionCtx?.hasUI && msg.content) {
+                if (sessionCtx?.hasUI && msg.message_type === "tool_call" && msg.content) {
                   sessionCtx.ui.setWorkingMessage(msg.content.slice(0, 80));
                 }
               });
