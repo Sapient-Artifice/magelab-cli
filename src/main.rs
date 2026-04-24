@@ -103,6 +103,9 @@ enum Commands {
         /// Remove the extension instead of installing
         #[arg(long)]
         uninstall: bool,
+        /// Link to repo source instead of embedding (for development)
+        #[arg(long)]
+        dev: bool,
     },
     /// Print version
     Version,
@@ -170,7 +173,7 @@ async fn main() -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "magelab", &mut std::io::stdout());
             Ok(())
         }
-        Commands::SetupPi { uninstall } => cmd_setup_pi(uninstall),
+        Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
         Commands::Version => {
             println!("magelab {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -245,10 +248,7 @@ async fn cmd_connect(
     let result = if local {
         if detect::check_backend_health(&config.local_url).await {
             connect::ConnectResult {
-                url: Some(format!(
-                    "ws://{}/ws",
-                    config.local_url.trim_start_matches("http://")
-                )),
+                url: Some(connect::to_ws_url(&config.local_url)),
                 token: None,
                 mode: "local".to_string(),
                 model: Some(config.default_model.clone()),
@@ -312,7 +312,9 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         anyhow::anyhow!("MageLab installation not found. Set magelab_home in config.")
     })?;
 
-    let _child = detect::launch_backend_headless(&home)?;
+    let child = detect::launch_backend_headless(&home, 11115)?;
+    // Detach the child so it outlives this CLI invocation
+    std::mem::forget(child);
 
     if wait {
         let sp = ui::spinner("Starting backend...");
@@ -465,13 +467,17 @@ const EXT_WEBSOCKET_TS: &str = include_str!("../extension/src/websocket.ts");
 const EXT_TOOLS_TS: &str = include_str!("../extension/src/tools.ts");
 const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 
-fn cmd_setup_pi(uninstall: bool) -> Result<()> {
+fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let ext_dir = home.join(".pi/agent/extensions/magelab-agent");
 
     if uninstall {
-        if ext_dir.exists() {
-            std::fs::remove_dir_all(&ext_dir)?;
+        if ext_dir.exists() || ext_dir.is_symlink() {
+            if ext_dir.is_symlink() {
+                std::fs::remove_file(&ext_dir)?;
+            } else {
+                std::fs::remove_dir_all(&ext_dir)?;
+            }
             ui::success("Removed Pi extension");
             ui::label("path", &ext_dir.display().to_string());
         } else {
@@ -554,60 +560,110 @@ fn cmd_setup_pi(uninstall: bool) -> Result<()> {
         ui::success("Pi coding agent installed");
     }
 
-    let sp = ui::spinner("Installing @magelab/agent extension...");
-
-    // Create directory structure
-    let src_dir = ext_dir.join("src");
-    std::fs::create_dir_all(&src_dir)?;
-
-    // Write embedded files
-    std::fs::write(ext_dir.join("package.json"), EXT_PACKAGE_JSON)?;
-    std::fs::write(ext_dir.join("tsconfig.json"), EXT_TSCONFIG)?;
-    std::fs::write(src_dir.join("index.ts"), EXT_INDEX_TS)?;
-    std::fs::write(src_dir.join("connection.ts"), EXT_CONNECTION_TS)?;
-    std::fs::write(src_dir.join("websocket.ts"), EXT_WEBSOCKET_TS)?;
-    std::fs::write(src_dir.join("tools.ts"), EXT_TOOLS_TS)?;
-    std::fs::write(src_dir.join("gateway.ts"), EXT_GATEWAY_TS)?;
-
-    sp.set_message("Installing dependencies...");
-
-    // Try pnpm first, fall back to npm
-    let install_result = std::process::Command::new("pnpm")
-        .arg("install")
-        .current_dir(&ext_dir)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .status();
-
-    let ok = match install_result {
-        Ok(s) if s.success() => true,
-        _ => {
-            // Fall back to npm
-            std::process::Command::new("npm")
-                .arg("install")
-                .current_dir(&ext_dir)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::piped())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+    // Remove existing install (file or symlink) before reinstalling
+    if ext_dir.exists() || ext_dir.is_symlink() {
+        if ext_dir.is_symlink() {
+            std::fs::remove_file(&ext_dir)?;
+        } else {
+            std::fs::remove_dir_all(&ext_dir)?;
         }
-    };
-
-    sp.finish_and_clear();
-
-    if !ok {
-        anyhow::bail!(
-            "Failed to install dependencies. Ensure pnpm or npm is available.\n\
-             Extension files written to: {}\n\
-             Run manually: cd {} && pnpm install",
-            ext_dir.display(),
-            ext_dir.display()
-        );
     }
 
-    ui::success("Pi extension installed");
-    ui::label("path", &ext_dir.display().to_string());
+    if dev {
+        // Dev mode: symlink to the repo's extension/ directory
+        let repo_ext = std::env::current_exe()?
+            .parent()
+            .and_then(|p| {
+                // Walk up from the binary to find extension/ dir
+                // cargo install puts binary in ~/.cargo/bin, so use cwd instead
+                None::<std::path::PathBuf>
+            })
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+            .join("extension");
+
+        // Prefer cwd/extension if it exists, otherwise ask
+        let ext_source = if repo_ext.join("src/index.ts").exists() {
+            repo_ext
+        } else {
+            // Try the magelab-cli repo from config
+            let cli_dir = std::env::current_dir()?;
+            let candidate = cli_dir.join("extension");
+            if candidate.join("src/index.ts").exists() {
+                candidate
+            } else {
+                anyhow::bail!(
+                    "Run from the magelab-cli repo directory, or use --dev from a directory containing extension/src/index.ts"
+                );
+            }
+        };
+
+        let extensions_dir = ext_dir.parent().unwrap();
+        std::fs::create_dir_all(extensions_dir)?;
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&ext_source, &ext_dir)?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&ext_source, &ext_dir)?;
+
+        ui::success("Pi extension linked (dev mode)");
+        ui::label("symlink", &ext_dir.display().to_string());
+        ui::label("target", &ext_source.display().to_string());
+    } else {
+        let sp = ui::spinner("Installing @magelab/agent extension...");
+
+        // Create directory structure
+        let src_dir = ext_dir.join("src");
+        std::fs::create_dir_all(&src_dir)?;
+
+        // Write embedded files
+        std::fs::write(ext_dir.join("package.json"), EXT_PACKAGE_JSON)?;
+        std::fs::write(ext_dir.join("tsconfig.json"), EXT_TSCONFIG)?;
+        std::fs::write(src_dir.join("index.ts"), EXT_INDEX_TS)?;
+        std::fs::write(src_dir.join("connection.ts"), EXT_CONNECTION_TS)?;
+        std::fs::write(src_dir.join("websocket.ts"), EXT_WEBSOCKET_TS)?;
+        std::fs::write(src_dir.join("tools.ts"), EXT_TOOLS_TS)?;
+        std::fs::write(src_dir.join("gateway.ts"), EXT_GATEWAY_TS)?;
+
+        sp.set_message("Installing dependencies...");
+
+        // Try pnpm first, fall back to npm
+        let install_result = std::process::Command::new("pnpm")
+            .arg("install")
+            .current_dir(&ext_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .status();
+
+        let ok = match install_result {
+            Ok(s) if s.success() => true,
+            _ => {
+                // Fall back to npm
+                std::process::Command::new("npm")
+                    .arg("install")
+                    .current_dir(&ext_dir)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+        };
+
+        sp.finish_and_clear();
+
+        if !ok {
+            anyhow::bail!(
+                "Failed to install dependencies. Ensure pnpm or npm is available.\n\
+                 Extension files written to: {}\n\
+                 Run manually: cd {} && pnpm install",
+                ext_dir.display(),
+                ext_dir.display()
+            );
+        }
+
+        ui::success("Pi extension installed");
+        ui::label("path", &ext_dir.display().to_string());
+    }
 
     // Check if backend is running (quick TCP probe)
     let backend_running = std::net::TcpStream::connect_timeout(

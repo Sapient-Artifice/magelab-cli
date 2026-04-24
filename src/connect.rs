@@ -6,6 +6,21 @@ use crate::auth;
 use crate::config::Config;
 use crate::detect;
 
+/// Convert an HTTP(S) URL to its WebSocket equivalent.
+/// http://host → ws://host/ws
+/// https://host → wss://host/ws
+pub fn to_ws_url(http_url: &str) -> String {
+    let base = http_url.trim_end_matches('/');
+    if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{}/ws", rest)
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{}/ws", rest)
+    } else {
+        // Already a ws/wss URL or unknown scheme — append /ws
+        format!("{}/ws", base)
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConnectResult {
     pub url: Option<String>,
@@ -22,10 +37,7 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     // 1. Check if local backend is already running
     if detect::check_backend_health(&config.local_url).await {
         return Ok(ConnectResult {
-            url: Some(format!(
-                "ws://{}/ws",
-                config.local_url.trim_start_matches("http://")
-            )),
+            url: Some(to_ws_url(&config.local_url)),
             token: None,
             mode: "local".to_string(),
             model: Some(config.default_model.clone()),
@@ -35,16 +47,16 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     // 2. Try to launch local backend (unless --no-launch)
     if !no_launch {
         if let Some(home) = detect::find_magelab_home(config.magelab_home.as_deref()) {
-            if let Ok(_child) = detect::launch_backend_headless(&home) {
+            if let Ok(child) = detect::launch_backend_headless(&home, 11115) {
+                // Detach the child so it outlives this CLI invocation
+                // without leaving a zombie (Unix) or being killed (Windows).
+                std::mem::forget(child);
                 if detect::wait_for_backend(&config.local_url, Duration::from_secs(15))
                     .await
                     .is_ok()
                 {
                     return Ok(ConnectResult {
-                        url: Some(format!(
-                            "ws://{}/ws",
-                            config.local_url.trim_start_matches("http://")
-                        )),
+                        url: Some(to_ws_url(&config.local_url)),
                         token: None,
                         mode: "local".to_string(),
                         model: Some(config.default_model.clone()),
@@ -58,7 +70,13 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     let creds = auth::credentials::Credentials::load().unwrap_or_default();
     if let Some(jwt) = get_valid_jwt(&creds, &config.gateway_url).await {
         if let Ok(devices) = detect::discover_devices(&config.gateway_url, &jwt).await {
-            if !devices.is_empty() {
+            // Use bound device if configured, otherwise any online device
+            let has_device = if let Some(ref bound) = config.default_device {
+                devices.iter().any(|d| d == bound)
+            } else {
+                !devices.is_empty()
+            };
+            if has_device {
                 // Get ws-ticket for relay connection
                 if let Ok(ticket) = detect::get_ws_ticket(&config.gateway_url, &jwt).await {
                     let url = format!(
@@ -109,7 +127,10 @@ async fn get_valid_jwt(
             // Try refresh
             if let Some(refresh) = &creds.refresh_token {
                 if let Ok(new_creds) = auth::oauth::refresh_token(gateway_url, refresh).await {
-                    let _ = new_creds.save();
+                    if let Err(e) = new_creds.save() {
+                        // Log but don't fail — the in-memory token is still usable
+                        eprintln!("[magelab] Warning: failed to persist refreshed token: {e}");
+                    }
                     return new_creds.access_token;
                 }
             }
