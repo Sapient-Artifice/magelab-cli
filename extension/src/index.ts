@@ -195,9 +195,16 @@ export default async function (pi: any) {
   const commandCount = registerCommands(pi, socket);
 
   // 8b. Stream backend agent responses to Pi
+  //     Only display via sendMessage — don't duplicate with streaming.
+  //     The backend sends assistant_stream (tokens) AND assistant (final).
+  //     We use assistant_stream for status only, assistant for display.
+  let magelabMode = true;
+  let streamedResponse = false;
+
   socket.on("assistant_stream", (msg: any) => {
     if (!sessionCtx?.hasUI) return;
     if (msg.phase === "start") {
+      streamedResponse = true;
       sessionCtx.ui.setStatus("magelab-agent", "MageLab agent responding...");
     } else if (msg.phase === "end") {
       sessionCtx.ui.setStatus("magelab-agent", undefined);
@@ -205,8 +212,17 @@ export default async function (pi: any) {
   });
 
   socket.on("assistant", (msg: any) => {
+    if (!magelabMode) return; // Only display when we're routing to backend
     if (!sessionCtx?.hasUI || !msg.text) return;
-    // Display the backend agent's response as a Pi message
+
+    // If we already streamed this response, the backend also sent a
+    // non-streaming "assistant" with the full text — skip it to avoid
+    // duplicates.
+    if (streamedResponse) {
+      streamedResponse = false;
+      return;
+    }
+
     pi.sendMessage({
       customType: "magelab-agent",
       content: msg.text,
@@ -217,6 +233,7 @@ export default async function (pi: any) {
 
   socket.on("assistant_complete", () => {
     if (!sessionCtx?.hasUI) return;
+    streamedResponse = false;
     sessionCtx.ui.setStatus("magelab-agent", undefined);
   });
 
@@ -224,8 +241,6 @@ export default async function (pi: any) {
   //    Default: user messages go to MageLab's backend agent.
   //    /pi: switch to Pi-native mode (Pi's LLM handles messages).
   //    /magelab: switch back to MageLab mode.
-  let magelabMode = true;
-
   pi.registerCommand("pi", {
     description: "Switch to Pi-native mode (Pi's LLM handles messages)",
     handler: async (_args: string, ctx: any) => {
