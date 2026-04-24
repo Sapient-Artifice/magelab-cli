@@ -31,40 +31,47 @@ function loadAutoApproveList(): Set<string> {
 }
 
 export default async function (pi: any) {
-  // 0a. Register custom renderer for MageLab agent messages
-  //     Renders as a subtle tinted bubble (like iMessage blue) instead of
-  //     the default [magelab-agent] bracket header.
+  // 0a. Register renderer for MageLab response messages
   try {
     // @ts-ignore — resolved at runtime by Pi's jiti loader
-    const { Box, Markdown, Container, Spacer } = await import("@mariozechner/pi-tui");
-    const { getMarkdownTheme, theme } = await import(
-      // @ts-ignore — resolved at runtime by Pi's jiti loader
-      "@mariozechner/pi-coding-agent/dist/modes/interactive/theme/theme.js"
-    );
+    const { Markdown, Container, Spacer } = await import("@mariozechner/pi-tui");
+
+    const id = (t: string) => t;
+    const mdTheme = {
+      heading: (t: string) => `\x1b[1m${t}\x1b[0m`,
+      link: (t: string) => `\x1b[4m${t}\x1b[0m`,
+      linkUrl: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      code: (t: string) => `\x1b[36m${t}\x1b[0m`,
+      codeBlock: id,
+      codeBlockBorder: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      quote: (t: string) => `\x1b[3m${t}\x1b[0m`,
+      quoteBorder: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      hr: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      listBullet: (t: string) => `\x1b[2m${t}\x1b[0m`,
+      bold: (t: string) => `\x1b[1m${t}\x1b[0m`,
+      italic: (t: string) => `\x1b[3m${t}\x1b[0m`,
+      strikethrough: (t: string) => `\x1b[9m${t}\x1b[0m`,
+      underline: (t: string) => `\x1b[4m${t}\x1b[0m`,
+    };
 
     pi.registerMessageRenderer(
-      "magelab-agent",
-      (message: any, _opts: any, _theme: any) => {
-        const container = new Container();
-        container.addChild(new Spacer(1));
-        const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
+      "magelab-response",
+      (message: any, _opts: any, _piTheme: any) => {
         const text =
           typeof message.content === "string"
             ? message.content
             : message.content
-                .filter((c: any) => c.type === "text")
+                ?.filter((c: any) => c.type === "text")
                 .map((c: any) => c.text)
-                .join("\n");
-        box.addChild(
-          new Markdown(text, 0, 0, getMarkdownTheme(), {
-            color: (t: string) => theme.fg("customMessageText", t),
-          })
-        );
-        container.addChild(box);
+                .join("\n") || "";
+        const container = new Container();
+        container.addChild(new Spacer(1));
+        container.addChild(new Markdown(text, 1, 0, mdTheme));
         return container;
       }
     );
-  } catch {
+  } catch (err) {
+    console.error("[magelab] Custom renderer failed:", err);
     // Theme/TUI imports failed — fall back to default rendering
   }
 
@@ -275,25 +282,8 @@ export default async function (pi: any) {
   // 8. Register /magelab command and skill slash commands
   const commandCount = registerCommands(pi, socket);
 
-  // 8b. Backend agent response status
-  //     The backend streams responses over WebSocket and Pi's TUI renders
-  //     them directly. We only manage the status line here — no sendMessage
-  //     to avoid duplicating the response.
+  // 8b. MageLab mode flag — when true, magelab-backend provider is active
   let magelabMode = true;
-
-  socket.on("assistant_stream", (msg: any) => {
-    if (!sessionCtx?.hasUI) return;
-    if (msg.phase === "start") {
-      sessionCtx.ui.setStatus("magelab-agent", "MageLab agent responding...");
-    } else if (msg.phase === "end") {
-      sessionCtx.ui.setStatus("magelab-agent", undefined);
-    }
-  });
-
-  socket.on("assistant_complete", () => {
-    if (!sessionCtx?.hasUI) return;
-    sessionCtx.ui.setStatus("magelab-agent", undefined);
-  });
 
   // 9. MageLab-first input routing
   //    Default: user messages go to MageLab's backend agent.
@@ -307,26 +297,156 @@ export default async function (pi: any) {
     },
   });
 
-  // Override the existing /magelab command to also act as a mode switch
-  // (the command registered in commands.ts sends a prompt; this one toggles mode)
-  pi.on("input", async (event: any, _ctx: any) => {
-    if (!magelabMode) return { action: "continue" };
-    if (!event.text?.trim()) return { action: "continue" };
+  // Register MageLab backend as a Pi provider using streamSimple.
+  // This makes Pi's native UX (user bubble, assistant bubble, streaming)
+  // work seamlessly — the backend IS the LLM provider.
+  {
+    // @ts-ignore — resolved at runtime by Pi's jiti loader
+    const { createAssistantMessageEventStream } = await import("@mariozechner/pi-ai");
 
-    const text = event.text.trim();
+    pi.registerProvider("magelab-backend", {
+      api: "magelab-ws",
+      baseUrl: "http://127.0.0.1:11115",
+      apiKey: "unused",
+      streamSimple: (_model: any, context: any) => {
+        const stream = createAssistantMessageEventStream();
 
-    // Don't intercept slash commands — let Pi handle those
-    if (text.startsWith("/")) return { action: "continue" };
-    // Don't intercept ! bash commands
-    if (text.startsWith("!")) return { action: "continue" };
+        (async () => {
+          const output: any = {
+            role: "assistant",
+            content: [],
+            api: "magelab-ws",
+            provider: "magelab-backend",
+            model: "magelab-agent",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            stopReason: "stop",
+            timestamp: Date.now(),
+          };
 
-    // Route to MageLab backend agent
-    socket.send({ type: "text", text });
-    if (sessionCtx?.hasUI) {
-      sessionCtx.ui.setStatus("magelab-agent", "MageLab agent thinking...");
-    }
-    return { action: "handled" };
-  });
+          try {
+            stream.push({ type: "start", partial: output });
+
+            // Send the last user message to the backend
+            const messages = context.messages || [];
+            const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
+            const text = lastUser?.content?.[0]?.text || lastUser?.content || "";
+            if (text) {
+              socket.send({ type: "text", text: typeof text === "string" ? text : JSON.stringify(text) });
+            }
+
+            // Stream tokens as they arrive from the backend
+            output.content.push({ type: "text", text: "" });
+            let started = false;
+
+            await new Promise<void>((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error("Backend did not respond within 120s")), 120_000);
+
+              // Streaming tokens
+              socket.on("assistant_stream", (msg: any) => {
+                if (msg.phase === "start") {
+                  started = true;
+                  stream.push({ type: "text_start", contentIndex: 0, partial: output });
+                } else if (msg.phase === "delta" && msg.token) {
+                  output.content[0].text += msg.token;
+                  stream.push({ type: "text_delta", contentIndex: 0, delta: msg.token, partial: output });
+                } else if (msg.phase === "end") {
+                  // Stream end — wait for assistant_complete
+                }
+              });
+
+              // Non-streaming fallback (backend sends complete text)
+              socket.on("assistant", (msg: any) => {
+                if (!started && msg.text) {
+                  output.content[0].text = msg.text;
+                  stream.push({ type: "text_start", contentIndex: 0, partial: output });
+                  stream.push({ type: "text_delta", contentIndex: 0, delta: msg.text, partial: output });
+                  started = true;
+                }
+              });
+
+              // Tool execution — emit as tool call events in the stream
+              socket.on("tool_debug", (msg: any) => {
+                if (msg.message_type === "tool_call" && msg.content) {
+                  // Parse tool call info if available
+                  const idx = output.content.length;
+                  output.content.push({
+                    type: "toolCall",
+                    id: `tool-${idx}`,
+                    name: msg.content.split("(")[0] || "tool",
+                    arguments: {},
+                  });
+                  stream.push({ type: "toolcall_start", contentIndex: idx, partial: output });
+                  stream.push({
+                    type: "toolcall_end",
+                    contentIndex: idx,
+                    toolCall: output.content[idx],
+                    partial: output,
+                  });
+                }
+              });
+
+              socket.on("tool_result", (msg: any) => {
+                // Show tool result as status
+                if (sessionCtx?.hasUI) {
+                  sessionCtx.ui.setStatus("magelab-tool", undefined);
+                }
+              });
+
+              // Subagent progress — show as status line updates
+              socket.on("subagent_update", (msg: any) => {
+                if (sessionCtx?.hasUI) {
+                  const label = msg.progress
+                    ? `${msg.name}: ${msg.progress}`
+                    : `${msg.name}: ${msg.status || "running"}`;
+                  sessionCtx.ui.setStatus("magelab-subagent", label);
+                }
+              });
+
+              socket.on("subagent_complete", (msg: any) => {
+                if (sessionCtx?.hasUI) {
+                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
+                }
+              });
+
+              // Done signal
+              socket.on("assistant_complete", () => {
+                clearTimeout(timeout);
+                if (sessionCtx?.hasUI) {
+                  sessionCtx.ui.setStatus("magelab-tool", undefined);
+                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
+                }
+                if (started) {
+                  stream.push({ type: "text_end", contentIndex: 0, content: output.content[0].text, partial: output });
+                }
+                resolve();
+              });
+            });
+
+            stream.push({ type: "done", reason: "stop", message: output });
+            stream.end();
+          } catch (err: any) {
+            output.stopReason = "error";
+            output.errorMessage = err.message;
+            stream.push({ type: "error", reason: "error", error: output });
+            stream.end();
+          }
+        })();
+
+        return stream;
+      },
+      models: [
+        {
+          id: "magelab-agent",
+          name: "MageLab Agent",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000,
+          maxTokens: 16384,
+        },
+      ],
+    });
+  }
 
   // 10. Activate only the MageLab tools we just registered on session start.
 
