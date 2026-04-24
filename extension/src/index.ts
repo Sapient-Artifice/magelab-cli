@@ -220,7 +220,42 @@ export default async function (pi: any) {
     sessionCtx.ui.setStatus("magelab-agent", undefined);
   });
 
-  // 9. Activate only the MageLab tools we just registered on session start.
+  // 9. MageLab-first input routing
+  //    Default: user messages go to MageLab's backend agent.
+  //    /pi: switch to Pi-native mode (Pi's LLM handles messages).
+  //    /magelab: switch back to MageLab mode.
+  let magelabMode = true;
+
+  pi.registerCommand("pi", {
+    description: "Switch to Pi-native mode (Pi's LLM handles messages)",
+    handler: async (_args: string, ctx: any) => {
+      magelabMode = false;
+      if (ctx.hasUI) ctx.ui.notify("Switched to Pi mode", "info");
+    },
+  });
+
+  // Override the existing /magelab command to also act as a mode switch
+  // (the command registered in commands.ts sends a prompt; this one toggles mode)
+  pi.on("input", async (event: any, _ctx: any) => {
+    if (!magelabMode) return { action: "continue" };
+    if (!event.text?.trim()) return { action: "continue" };
+
+    const text = event.text.trim();
+
+    // Don't intercept slash commands — let Pi handle those
+    if (text.startsWith("/")) return { action: "continue" };
+    // Don't intercept ! bash commands
+    if (text.startsWith("!")) return { action: "continue" };
+
+    // Route to MageLab backend agent
+    socket.send({ type: "text", text });
+    if (sessionCtx?.hasUI) {
+      sessionCtx.ui.setStatus("magelab-agent", "MageLab agent thinking...");
+    }
+    return { action: "handled" };
+  });
+
+  // 10. Activate only the MageLab tools we just registered on session start.
 
   pi.on("session_start", async (_event: unknown, ctx: any) => {
     sessionCtx = ctx;
