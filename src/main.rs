@@ -208,7 +208,12 @@ async fn main() -> Result<()> {
         }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Completions { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "magelab", &mut std::io::stdout());
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "magelab",
+                &mut std::io::stdout(),
+            );
             Ok(())
         }
         Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
@@ -520,7 +525,8 @@ const EXT_TOOLS_TS: &str = include_str!("../extension/src/tools.ts");
 const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 
 fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let ext_dir = home.join(".pi/agent/extensions/magelab-agent");
 
     if uninstall {
@@ -623,22 +629,8 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
 
     if dev {
         // Dev mode: symlink to the repo's extension/ directory
-        let repo_ext = std::env::current_exe()?
-            .parent()
-            .and_then(|p| {
-                // Walk up from the binary to find extension/ dir
-                // cargo install puts binary in ~/.cargo/bin, so use cwd instead
-                None::<std::path::PathBuf>
-            })
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
-            .join("extension");
-
-        // Prefer cwd/extension if it exists, otherwise ask
-        let ext_source = if repo_ext.join("src/index.ts").exists() {
-            repo_ext
-        } else {
-            // Try the magelab-cli repo from config
-            let cli_dir = std::env::current_dir()?;
+        let cli_dir = std::env::current_dir()?;
+        let ext_source = {
             let candidate = cli_dir.join("extension");
             if candidate.join("src/index.ts").exists() {
                 candidate

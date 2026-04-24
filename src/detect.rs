@@ -185,9 +185,9 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
     let log_path = log_dir.join("backend.log");
     let log_file = std::fs::File::create(&log_path)
         .unwrap_or_else(|_| std::fs::File::create("/dev/null").unwrap());
-    let log_file_err = log_file.try_clone().unwrap_or_else(|_| {
-        std::fs::File::create("/dev/null").unwrap()
-    });
+    let log_file_err = log_file
+        .try_clone()
+        .unwrap_or_else(|_| std::fs::File::create("/dev/null").unwrap());
 
     let child = Command::new(&python)
         .args([
@@ -212,6 +212,7 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
 }
 
 /// Extract the port from an http(s) URL, defaulting to 11115.
+#[allow(dead_code)]
 pub fn port_from_url(url: &str) -> u16 {
     url::Url::parse(url)
         .ok()

@@ -11,9 +11,7 @@ use std::collections::HashMap;
 #[allow(dead_code)]
 pub enum OutgoingMessage {
     #[serde(rename = "text")]
-    TextMessage {
-        text: String,
-    },
+    TextMessage { text: String },
 
     #[serde(rename = "audio")]
     AudioMessage {},
@@ -40,20 +38,13 @@ pub enum OutgoingMessage {
     },
 
     #[serde(rename = "set_model")]
-    SetModel {
-        model: String,
-    },
+    SetModel { model: String },
 
     #[serde(rename = "set_voice")]
-    SetVoice {
-        voice: String,
-    },
+    SetVoice { voice: String },
 
     #[serde(rename = "get_models")]
-    GetModels {
-        endpoint: String,
-        api_key: String,
-    },
+    GetModels { endpoint: String, api_key: String },
 
     #[serde(rename = "new_chat")]
     NewChat {},
@@ -62,14 +53,10 @@ pub enum OutgoingMessage {
     GetChats {},
 
     #[serde(rename = "set_chat")]
-    SetChat {
-        history_path: String,
-    },
+    SetChat { history_path: String },
 
     #[serde(rename = "control")]
-    Control {
-        action: String,
-    },
+    Control { action: String },
 
     #[serde(rename = "lifecycle")]
     Lifecycle {
@@ -78,9 +65,7 @@ pub enum OutgoingMessage {
     },
 
     #[serde(rename = "cancel_subagent")]
-    CancelSubagent {
-        task_id: String,
-    },
+    CancelSubagent { task_id: String },
 }
 
 /// Messages received from backend via WebSocket
@@ -164,9 +149,7 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "tools_list")]
-    ToolsList {
-        tools: Vec<Value>,
-    },
+    ToolsList { tools: Vec<Value> },
 
     #[serde(rename = "tool_call_result")]
     ToolCallResult {
@@ -252,20 +235,13 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "notify")]
-    Notify {
-        title: String,
-        body: String,
-    },
+    Notify { title: String, body: String },
 
     #[serde(rename = "open_url")]
-    OpenUrl {
-        url: String,
-    },
+    OpenUrl { url: String },
 
     #[serde(rename = "open_file")]
-    OpenFile {
-        filepath: String,
-    },
+    OpenFile { filepath: String },
 
     #[serde(rename = "broker_status")]
     BrokerStatus {

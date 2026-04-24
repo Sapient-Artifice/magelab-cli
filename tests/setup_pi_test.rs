@@ -44,7 +44,10 @@ fn test_setup_pi_offers_install_when_npm_available() {
     Command::cargo_bin("magelab")
         .unwrap()
         .arg("setup-pi")
-        .env("PATH", format!("/nonexistent:{}", std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!("/nonexistent:{}", std::env::var("PATH").unwrap_or_default()),
+        )
         .write_stdin("n\n")
         .assert()
         .success()
@@ -80,7 +83,9 @@ fn test_setup_pi_uninstall_removes_directory() {
         .stderr(predicate::str::contains("Removed"));
 
     assert!(
-        !tmp.path().join(".pi/agent/extensions/magelab-agent").exists(),
+        !tmp.path()
+            .join(".pi/agent/extensions/magelab-agent")
+            .exists(),
         "Extension directory should be removed"
     );
 }
