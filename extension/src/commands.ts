@@ -184,9 +184,10 @@ export function registerCommands(
     },
   });
 
-  // 5. /model <name> — switch backend LLM model
-  pi.registerCommand("model", {
-    description: "Switch MageLab backend model",
+  // 5. /backend-model <name> — switch backend LLM model
+  //    Pi has a built-in /model command, so we use a different name.
+  pi.registerCommand("backend-model", {
+    description: "Show or switch MageLab backend model",
     handler: async (args: string, ctx: any) => {
       const model = args.trim();
       if (!model) {
