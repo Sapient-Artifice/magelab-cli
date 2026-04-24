@@ -308,7 +308,7 @@ export default async function (pi: any) {
       api: "magelab-ws",
       baseUrl: "http://127.0.0.1:11115",
       apiKey: "unused",
-      streamSimple: (_model: any, context: any) => {
+      streamSimple: (_model: any, context: any, options?: any) => {
         const stream = createAssistantMessageEventStream();
 
         (async () => {
@@ -336,63 +336,72 @@ export default async function (pi: any) {
 
             // Stream tokens as they arrive from the backend
             output.content.push({ type: "text", text: "" });
-            let started = false;
+            let textStarted = false;
+            const signal = options?.signal;
 
             await new Promise<void>((resolve, reject) => {
               const timeout = setTimeout(() => reject(new Error("Backend did not respond within 120s")), 120_000);
 
-              // Streaming tokens
+              // Handle abort (Esc key)
+              signal?.addEventListener("abort", () => {
+                clearTimeout(timeout);
+                socket.send({ type: "control", action: "stop" });
+                resolve();
+              });
+
+              const finish = () => {
+                clearTimeout(timeout);
+                if (sessionCtx?.hasUI) {
+                  sessionCtx.ui.setStatus("magelab-tool", undefined);
+                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
+                }
+                if (textStarted) {
+                  stream.push({ type: "text_end", contentIndex: 0, content: output.content[0].text, partial: output });
+                }
+                resolve();
+              };
+
+              // Streaming tokens (when backend has stream: true)
               socket.on("assistant_stream", (msg: any) => {
                 if (msg.phase === "start") {
-                  started = true;
+                  textStarted = true;
                   stream.push({ type: "text_start", contentIndex: 0, partial: output });
                 } else if (msg.phase === "delta" && msg.token) {
                   output.content[0].text += msg.token;
                   stream.push({ type: "text_delta", contentIndex: 0, delta: msg.token, partial: output });
                 } else if (msg.phase === "end") {
-                  // Stream end — wait for assistant_complete
+                  // Stream end — finish
+                  finish();
                 }
               });
 
-              // Non-streaming fallback (backend sends complete text)
+              // Non-streaming (backend sends complete text at once)
               socket.on("assistant", (msg: any) => {
-                if (!started && msg.text) {
+                if (msg.text) {
                   output.content[0].text = msg.text;
-                  stream.push({ type: "text_start", contentIndex: 0, partial: output });
+                  if (!textStarted) {
+                    stream.push({ type: "text_start", contentIndex: 0, partial: output });
+                    textStarted = true;
+                  }
                   stream.push({ type: "text_delta", contentIndex: 0, delta: msg.text, partial: output });
-                  started = true;
+                  finish();
                 }
               });
 
-              // Tool execution — emit as tool call events in the stream
-              socket.on("tool_debug", (msg: any) => {
-                if (msg.message_type === "tool_call" && msg.content) {
-                  // Parse tool call info if available
-                  const idx = output.content.length;
-                  output.content.push({
-                    type: "toolCall",
-                    id: `tool-${idx}`,
-                    name: msg.content.split("(")[0] || "tool",
-                    arguments: {},
-                  });
-                  stream.push({ type: "toolcall_start", contentIndex: idx, partial: output });
-                  stream.push({
-                    type: "toolcall_end",
-                    contentIndex: idx,
-                    toolCall: output.content[idx],
-                    partial: output,
-                  });
+              // Tool execution status
+              socket.on("confirmation_request", (msg: any) => {
+                if (sessionCtx?.hasUI) {
+                  sessionCtx.ui.setStatus("magelab-tool", `${msg.function_name}...`);
                 }
               });
 
               socket.on("tool_result", (msg: any) => {
-                // Show tool result as status
                 if (sessionCtx?.hasUI) {
                   sessionCtx.ui.setStatus("magelab-tool", undefined);
                 }
               });
 
-              // Subagent progress — show as status line updates
+              // Subagent progress
               socket.on("subagent_update", (msg: any) => {
                 if (sessionCtx?.hasUI) {
                   const label = msg.progress
@@ -408,17 +417,9 @@ export default async function (pi: any) {
                 }
               });
 
-              // Done signal
+              // Done signal (streaming mode)
               socket.on("assistant_complete", () => {
-                clearTimeout(timeout);
-                if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setStatus("magelab-tool", undefined);
-                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
-                }
-                if (started) {
-                  stream.push({ type: "text_end", contentIndex: 0, content: output.content[0].text, partial: output });
-                }
-                resolve();
+                finish();
               });
             });
 
