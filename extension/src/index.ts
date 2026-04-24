@@ -31,6 +31,43 @@ function loadAutoApproveList(): Set<string> {
 }
 
 export default async function (pi: any) {
+  // 0a. Register custom renderer for MageLab agent messages
+  //     Renders as a subtle tinted bubble (like iMessage blue) instead of
+  //     the default [magelab-agent] bracket header.
+  try {
+    // @ts-ignore — resolved at runtime by Pi's jiti loader
+    const { Box, Markdown, Container, Spacer } = await import("@mariozechner/pi-tui");
+    // @ts-ignore — resolved at runtime by Pi's jiti loader
+    const { getMarkdownTheme, theme } = await import(
+      "@mariozechner/pi-coding-agent/dist/modes/interactive/theme/theme.js"
+    );
+
+    pi.registerMessageRenderer(
+      "magelab-agent",
+      (message: any, _opts: any, _theme: any) => {
+        const container = new Container();
+        container.addChild(new Spacer(1));
+        const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
+        const text =
+          typeof message.content === "string"
+            ? message.content
+            : message.content
+                .filter((c: any) => c.type === "text")
+                .map((c: any) => c.text)
+                .join("\n");
+        box.addChild(
+          new Markdown(text, 0, 0, getMarkdownTheme(), {
+            color: (t: string) => theme.fg("customMessageText", t),
+          })
+        );
+        container.addChild(box);
+        return container;
+      }
+    );
+  } catch {
+    // Theme/TUI imports failed — fall back to default rendering
+  }
+
   // 0. Register MageLab skill directories with Pi (no backend needed)
   pi.on("resources_discover", (_event: unknown, _ctx: any) => {
     const skillPaths: string[] = [];
@@ -146,7 +183,26 @@ export default async function (pi: any) {
     }
   });
 
-  // 5. Subagent status display
+  // 5. Tool execution display — show backend agent's tool calls in Pi's status
+  socket.on("tool_result", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    const name = msg.function_name || "tool";
+    sessionCtx.ui.setStatus("magelab-tool", undefined); // clear after completion
+  });
+
+  socket.on("tool_debug", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    if (msg.message_type === "tool_call") {
+      // Show which tool is being called
+      const content = msg.content || "";
+      sessionCtx.ui.setStatus("magelab-tool", `running: ${content.slice(0, 60)}`);
+    }
+  });
+
+  // Also show confirmation_request as tool execution status
+  // (the permission gate handles the response, this just shows status)
+
+  // 6. Subagent status display
   socket.on("subagent_update", (msg: any) => {
     if (!sessionCtx?.hasUI) return;
     const label = msg.progress
