@@ -124,7 +124,38 @@ export default async function (pi: any) {
     }
   });
 
-  // 5. Fetch and register backend tools
+  // 5. Subagent status display
+  socket.on("subagent_update", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    const label = msg.progress
+      ? `${msg.name}: ${msg.progress}`
+      : `${msg.name}: ${msg.status || "running"}`;
+    sessionCtx.ui.setStatus("magelab-subagent", label);
+  });
+
+  socket.on("subagent_complete", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    sessionCtx.ui.setStatus("magelab-subagent", undefined); // clear status
+    const level = msg.error ? "error" : "info";
+    const detail = msg.error || msg.result || msg.status || "done";
+    sessionCtx.ui.notify(`Subagent ${msg.name}: ${detail}`, level);
+  });
+
+  // 6. Backend notifications (Notify, OpenUrl, OpenFile)
+  socket.on("notify", (msg: any) => {
+    if (!sessionCtx?.hasUI) return;
+    sessionCtx.ui.notify(`${msg.title}: ${msg.body}`, "info");
+  });
+
+  socket.on("open_url", (msg: any) => {
+    import("open").then((m) => m.default(msg.url)).catch(() => {});
+  });
+
+  socket.on("open_file", (msg: any) => {
+    import("open").then((m) => m.default(msg.filepath)).catch(() => {});
+  });
+
+  // 7. Fetch and register backend tools
   let toolCount: number;
   try {
     toolCount = await registerBackendTools(pi, socket);
@@ -133,7 +164,7 @@ export default async function (pi: any) {
     return;
   }
 
-  // 6. Activate extension tools on session start (can't call setActiveTools during loading)
+  // 8. Activate extension tools on session start (can't call setActiveTools during loading)
   pi.on("session_start", async (_event: unknown, ctx: any) => {
     sessionCtx = ctx;
     try {
@@ -153,7 +184,7 @@ export default async function (pi: any) {
     }
   });
 
-  // 7. Clean shutdown
+  // 9. Clean shutdown
   pi.on("session_shutdown", async () => {
     socket.close();
   });
