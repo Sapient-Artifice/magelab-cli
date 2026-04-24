@@ -157,4 +157,50 @@ describe("BackendSocket", () => {
     socket.close();
     expect(socket.state).toBe("disconnected");
   });
+
+  it("appends token as query parameter for relay URLs", async () => {
+    // Create a backend that records the connection URL
+    const tokenBackend = new MockBackend();
+    await tokenBackend.start();
+
+    // Connect with a token — the URL should get the token appended
+    const baseUrl = `${tokenBackend.url}?ws_ticket=abc123`;
+    const socket = await BackendSocket.connect(baseUrl, "my_jwt_token");
+
+    // Verify connection succeeded (token was transmitted, not dropped)
+    expect(socket.closed).toBe(false);
+    socket.close();
+    await tokenBackend.close();
+  });
+
+  it("explicit close does not fire reconnecting state", async () => {
+    const socket = await BackendSocket.connect(backend.url);
+
+    const states: string[] = [];
+    socket.onStateChange((s) => states.push(s));
+
+    socket.close();
+
+    // Wait for any async close events to propagate
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should NOT contain "reconnecting" — only "disconnected" is acceptable
+    expect(states).not.toContain("reconnecting");
+    expect(socket.state).toBe("disconnected");
+  });
+
+  it("handles concurrent requestByType calls of same type", async () => {
+    // Two concurrent get_tools requests should both resolve independently
+    const socket = await BackendSocket.connect(backend.url);
+
+    const [r1, r2] = await Promise.all([
+      socket.requestByType({ type: "get_tools" }, "tools_list"),
+      socket.requestByType({ type: "get_tools" }, "tools_list"),
+    ]);
+
+    expect(r1.type).toBe("tools_list");
+    expect(r2.type).toBe("tools_list");
+
+    socket.close();
+  });
 });

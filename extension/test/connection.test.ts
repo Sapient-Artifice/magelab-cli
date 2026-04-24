@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getConnection } from "../src/connection.js";
+import { getConnection, validateConnectionInfo } from "../src/connection.js";
 
 // These tests exercise getConnection against the real `magelab` binary.
 // If `magelab` isn't installed, they verify the ENOENT fallback behavior.
@@ -49,5 +49,37 @@ describe("getConnection", () => {
     if (conn.url !== null) {
       expect(typeof conn.url).toBe("string");
     }
+  });
+});
+
+describe("validateConnectionInfo", () => {
+  it("accepts valid connection info", () => {
+    expect(() =>
+      validateConnectionInfo({ url: "ws://localhost/ws", token: null, mode: "local", model: "gpt-4" })
+    ).not.toThrow();
+  });
+
+  it("accepts mode=none with null url", () => {
+    expect(() =>
+      validateConnectionInfo({ url: null, token: null, mode: "none", model: null })
+    ).not.toThrow();
+  });
+
+  it("rejects invalid mode", () => {
+    expect(() =>
+      validateConnectionInfo({ url: null, token: null, mode: "bogus" as any, model: null })
+    ).toThrow("Invalid mode");
+  });
+
+  it("rejects missing mode field", () => {
+    expect(() =>
+      validateConnectionInfo({ url: null, token: null } as any)
+    ).toThrow();
+  });
+
+  it("rejects non-string url when mode is not none", () => {
+    expect(() =>
+      validateConnectionInfo({ url: 42, token: null, mode: "local", model: null } as any)
+    ).toThrow();
   });
 });

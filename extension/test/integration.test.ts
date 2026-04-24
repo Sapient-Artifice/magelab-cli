@@ -44,7 +44,7 @@ describe("full integration flow", () => {
     // 3. Register tools
     const pi = { registerTool: (def: any) => tools.push(def) };
     const tools: any[] = [];
-    const count = await registerBackendTools(pi, socket);
+    const { count } = await registerBackendTools(pi, socket);
 
     expect(count).toBeGreaterThan(0);
     const runPython = tools.find((t) => t.name === "run_python");

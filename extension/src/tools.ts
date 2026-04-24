@@ -11,17 +11,20 @@ const SKIP_TOOLS = new Set([
 
 /**
  * Fetch tool schemas from the backend and register non-native tools with Pi.
+ * Returns the set of registered tool names so the caller can activate only
+ * these tools (not every inactive tool in Pi).
  */
 export async function registerBackendTools(
   pi: any, // ExtensionAPI — typed as any to avoid hard dep on Pi types
   socket: BackendSocket
-): Promise<number> {
+): Promise<{ count: number; names: Set<string> }> {
   const response = await socket.requestByType<ToolsList>(
     { type: "get_tools" },
     "tools_list"
   );
 
   let registered = 0;
+  const names = new Set<string>();
 
   for (const tool of response.tools as unknown as ToolSchema[]) {
     const fn = tool.function;
@@ -52,9 +55,15 @@ export async function registerBackendTools(
           };
         }
 
+        // Check cancellation before starting the remote call.
+        if (signal?.aborted) {
+          return { content: [{ type: "text", text: "Cancelled" }], isError: true };
+        }
+
         try {
           const result = await socket.callTool(name, params);
 
+          // Check again after the (potentially long) remote call returns.
           if (signal?.aborted) {
             return {
               content: [{ type: "text", text: "Cancelled" }],
@@ -88,10 +97,11 @@ export async function registerBackendTools(
       },
     });
 
+    names.add(name);
     registered++;
   }
 
-  return registered;
+  return { count: registered, names };
 }
 
 /**

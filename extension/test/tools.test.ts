@@ -27,7 +27,7 @@ describe("registerBackendTools", () => {
     const socket = await BackendSocket.connect(backend.url);
     const pi = createMockPi();
 
-    const count = await registerBackendTools(pi, socket);
+    const { count } = await registerBackendTools(pi, socket);
 
     // Default mock backend has 8 tools:
     //   run_python, search_web, read_file, write_file, run_bash,
@@ -174,7 +174,7 @@ describe("registerBackendTools", () => {
 
     const socket = await BackendSocket.connect(emptyBackend.url);
     const pi = createMockPi();
-    const count = await registerBackendTools(pi, socket);
+    const { count } = await registerBackendTools(pi, socket);
 
     expect(count).toBe(0);
     expect(pi.registeredTools).toHaveLength(0);

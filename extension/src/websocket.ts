@@ -46,7 +46,7 @@ export class BackendSocket {
   private ws: ReconnectingWebSocket;
   private handlers = new Map<string, ((msg: ServerMessage) => void)[]>();
   private pendingByCallId = new Map<string, PendingRequest>();
-  private pendingByType = new Map<string, PendingRequest>();
+  private pendingByType = new Map<string, PendingRequest[]>();
   private _closed = false;
   private _state: ConnectionState = "connected";
   private _onStateChange?: (state: ConnectionState) => void;
@@ -66,6 +66,8 @@ export class BackendSocket {
     });
 
     ws.addEventListener("close", () => {
+      // Don't fire reconnecting transition if already explicitly closed
+      if (this._state === "disconnected") return;
       this._closed = true;
       this._state = "reconnecting";
       this._onStateChange?.("reconnecting");
@@ -90,9 +92,18 @@ export class BackendSocket {
    * with exponential backoff (default: 1s, 2s, 4s, max 10s, 3 retries).
    */
   static connect(
-    url: string,
+    rawUrl: string,
     token?: string | null
   ): Promise<BackendSocket> {
+    // Append token as a query parameter before opening the socket.
+    // partysocket does not support custom HTTP headers on the upgrade request,
+    // so ?token=<jwt> is the only portable mechanism.
+    let url = rawUrl;
+    if (token) {
+      const sep = url.includes("?") ? "&" : "?";
+      url = `${url}${sep}token=${encodeURIComponent(token)}`;
+    }
+
     return new Promise((resolve, reject) => {
       const protocols: string[] = [];
       const ws = new ReconnectingWebSocket(url, protocols, {
@@ -103,11 +114,6 @@ export class BackendSocket {
         connectionTimeout: 5000,
         startClosed: false,
       });
-
-      if (token && url.includes("?")) {
-        // Relay URLs already have query params (ws_ticket), token goes as header
-        // For now, skip header-based auth in partysocket (works for local mode)
-      }
 
       let connected = false;
       ws.addEventListener("open", () => {
@@ -184,16 +190,23 @@ export class BackendSocket {
     }
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingByType.delete(expectedType);
-        reject(new Error(`Request timed out waiting for ${expectedType}`));
-      }, timeoutMs);
-
-      this.pendingByType.set(expectedType, {
+      const entry: PendingRequest = {
         resolve: resolve as (msg: ServerMessage) => void,
         reject,
-        timer,
-      });
+        timer: setTimeout(() => {
+          const queue = this.pendingByType.get(expectedType);
+          if (queue) {
+            const idx = queue.indexOf(entry);
+            if (idx !== -1) queue.splice(idx, 1);
+            if (queue.length === 0) this.pendingByType.delete(expectedType);
+          }
+          reject(new Error(`Request timed out waiting for ${expectedType}`));
+        }, timeoutMs),
+      };
+
+      const queue = this.pendingByType.get(expectedType) || [];
+      queue.push(entry);
+      this.pendingByType.set(expectedType, queue);
       this.send(msg);
     });
   }
@@ -205,12 +218,14 @@ export class BackendSocket {
   }
 
   close(): void {
-    if (!this._closed || this._state !== "disconnected") {
-      this._closed = true;
-      this._state = "disconnected";
-      this.rejectAll("WebSocket closed");
-      this.ws.close();
-    }
+    // Guard: only close if not already in the fully-disconnected state.
+    // Use AND so that a socket that is _closed=true but still reconnecting
+    // (state=="reconnecting") is properly shut down.
+    if (this._closed && this._state === "disconnected") return;
+    this._closed = true;
+    this._state = "disconnected";
+    this.rejectAll("WebSocket closed");
+    this.ws.close();
   }
 
   private dispatch(msg: ServerMessage): void {
@@ -224,9 +239,10 @@ export class BackendSocket {
       }
     }
 
-    const pendingType = this.pendingByType.get(msg.type);
-    if (pendingType) {
-      this.pendingByType.delete(msg.type);
+    const typeQueue = this.pendingByType.get(msg.type);
+    if (typeQueue && typeQueue.length > 0) {
+      const pendingType = typeQueue.shift()!;
+      if (typeQueue.length === 0) this.pendingByType.delete(msg.type);
       clearTimeout(pendingType.timer);
       pendingType.resolve(msg);
       return;
@@ -247,9 +263,11 @@ export class BackendSocket {
     }
     this.pendingByCallId.clear();
 
-    for (const [, pending] of this.pendingByType) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error(reason));
+    for (const [, queue] of this.pendingByType) {
+      for (const pending of queue) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error(reason));
+      }
     }
     this.pendingByType.clear();
   }
