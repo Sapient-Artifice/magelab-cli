@@ -15,7 +15,12 @@ Add macOS Touch ID support to the magelab CLI to protect credential access, gate
 
 ## Approach
 
-Use the `security-framework` Rust crate to create Keychain items with `kSecAccessControlBiometryCurrentSet`. The refresh token is stored in a biometric-protected Keychain item separate from the regular credentials. The OS triggers the Touch ID prompt automatically when the item is accessed.
+Two Apple frameworks are used, each for a distinct purpose:
+
+1. **`LocalAuthentication.framework`** (`LAContext.evaluatePolicy`) -- standalone biometric prompts for `verify()`. Used by Sensitive-tier operations (keys, logout) that need a "prove you're the user" check without accessing any Keychain item.
+2. **`Security.framework`** (`SecItemAdd`/`SecItemCopyMatching` with `kSecAccessControlBiometryCurrentSet`) -- biometric-gated Keychain storage for `store_secure()`/`load_secure()`. The OS triggers Touch ID automatically when the protected item is accessed.
+
+Both require the `security-framework-sys` crate for raw FFI calls. The high-level `security-framework` crate does not expose `SecAccessControl` on generic password items, so `store_secure()` and `load_secure()` call `SecItemAdd`/`SecItemCopyMatching` directly with `CFDictionary` containing `kSecAttrAccessControl`. The `verify()` standalone prompt uses `LAContext` via Objective-C FFI (`objc2` crate).
 
 On non-macOS platforms, all biometric code compiles to no-ops. Existing behavior is unchanged.
 
@@ -45,10 +50,14 @@ On non-macOS platforms, all biometric code compiles to no-ops. Existing behavior
               +----------+----------+
                          |
               +----------v----------+
-              |   macOS Keychain    |
-              | (Security.framework |
-              |  via security-      |
-              |  framework crate)   |
+              |   macOS Frameworks  |
+              | Security.framework  |
+              |  (Keychain + ACL)   |
+              | LocalAuthentication |
+              |  (standalone prompt)|
+              | via security-       |
+              | framework-sys +     |
+              | objc2 crates        |
               +---------------------+
 ```
 
@@ -91,19 +100,22 @@ Read-only or frequent operations. After a successful Touch ID verification, subs
 | `magelab usage` |
 | `magelab balance` |
 | `magelab connect` |
-| `magelab status` |
 | `magelab devices` |
+
+`magelab status` does not require Touch ID -- it only performs a local health check and reads cached credential state without contacting the gateway.
 
 ### Session cache
 
-A file at `~/.config/magelab/.touchid-session`:
+A file at `~/.config/magelab/touchid-session`:
 
 - Contents: Unix timestamp of last successful verification
 - Permissions: `0600`
 - Valid when: timestamp is within 5 minutes AND file owner matches current UID
 - Deleted on: `magelab logout`
 
-No daemon or IPC. Each CLI invocation reads the file and checks the timestamp. The 5-minute window is hardcoded.
+No daemon or IPC. Each CLI invocation reads the file and checks the timestamp. The 5-minute window is hardcoded. An optional `MAGELAB_TOUCHID_TTL` environment variable can override the default (in seconds).
+
+**Limitation:** The session cache file is writable by any process running as the same user. A same-UID attacker (e.g., malicious script in the same shell session) could forge the file to bypass Touch ID for Cached-tier operations. This is an accepted limitation: a same-UID attacker already has access to process memory and could read credentials directly. Touch ID primarily protects against a different user, a remote attacker with the credential file, or an unauthorized process on a locked machine.
 
 ### Bypass: `--no-touchid`
 
@@ -115,12 +127,14 @@ A global CLI flag `magelab --no-touchid <command>` that skips all biometric chec
 
 ### Sensitive operation flow
 
+Uses `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` for a standalone biometric prompt. This is independent of Keychain access.
+
 ```
 Command invoked (e.g., keys create)
   -> touchid::is_available()?
     -> No:  proceed without prompt (graceful fallback)
     -> Yes: touchid::verify(Tier::Sensitive, "manage API keys")?
-      -> Trigger standalone Touch ID prompt
+      -> LAContext.evaluatePolicy() triggers Touch ID
       -> Success: proceed
       -> Fail/cancelled: abort with error
 ```
@@ -182,17 +196,21 @@ pub fn clear() -> Result<()>;
 
 ### `--no-touchid` flag handling
 
-The `no_touchid` flag is set via a thread-local or `once_cell` static at CLI startup in `main()`, before any command dispatch. `is_available()` checks this static and returns `false` when the flag is set. This avoids threading the flag through every function signature.
+The `no_touchid` flag is set via an `AtomicBool` static at CLI startup in `main()`, before any command dispatch. `is_available()` checks this static and returns `false` when the flag is set. This avoids threading the flag through every function signature.
+
+`AtomicBool` is used instead of `OnceLock<bool>` because it always succeeds on write (no "first-write-wins" semantic that could silently fail in tests or double-init scenarios).
 
 ```rust
-static NO_TOUCHID: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static NO_TOUCHID: AtomicBool = AtomicBool::new(false);
 
 pub fn set_disabled(disabled: bool) {
-    NO_TOUCHID.set(disabled).ok();
+    NO_TOUCHID.store(disabled, Ordering::SeqCst);
 }
 
 pub fn is_available() -> bool {
-    if *NO_TOUCHID.get().unwrap_or(&false) {
+    if NO_TOUCHID.load(Ordering::SeqCst) {
         return false;
     }
     // ... hardware + interactive checks
@@ -216,7 +234,7 @@ mod fallback {
 
 ### `credentials.rs`
 
-- `save()`: after saving to `keyring`, call `touchid::store_secure(refresh_token)` if a refresh token is present. On success, remove the refresh token from the regular keychain item.
+- `save()`: after saving to `keyring`, call `touchid::store_secure(refresh_token)` if a refresh token is present. Verify the biometric item can be stored successfully before removing the refresh token from the regular keychain item. If `store_secure()` fails, keep the refresh token in the regular item and log a warning.
 - `clear()`: also call `touchid::clear()`.
 
 ### `main.rs`
@@ -243,7 +261,8 @@ Gate calls at command dispatch:
 - `cmd_account()`: `verify(Tier::Cached, "access account info")`
 - `cmd_devices()`: `verify(Tier::Cached, "access devices")`
 - `cmd_connect()`: `verify(Tier::Cached, "connect")`
-- `cmd_status()`: `verify(Tier::Cached, "check status")`
+
+`cmd_status()` does not require Touch ID verification.
 
 ### `oauth.rs`
 
@@ -254,20 +273,26 @@ In `ensure_valid_jwt()` / `get_token()`: when refresh is needed, use `touchid::l
 On first run after upgrade:
 
 1. Load existing credentials via `keyring` (current path)
-2. If Touch ID is available and a refresh token is present: store the refresh token in the biometric item, remove it from the regular item
+2. If Touch ID is available and a refresh token is present:
+   a. Store the refresh token in the biometric Keychain item via `store_secure()`
+   b. If store succeeds, remove the refresh token from the regular keychain item
+   c. If store fails, keep the refresh token in the regular item and log a warning -- the CLI continues to work without biometric-gated refresh
 3. If Touch ID is unavailable: no change, everything works as before
 
-Migration is transparent and automatic. No user action required.
+Migration is transparent and automatic. No user action required. No credential data is lost even if the biometric store fails.
 
 ## Dependency Changes
 
 ```toml
 # Cargo.toml
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3"
+security-framework-sys = "3"  # Raw FFI for SecItemAdd/SecItemCopyMatching with ACL
+objc2 = "0.6"                 # LAContext for standalone biometric prompts
+objc2-local-authentication = "0.4"  # LocalAuthentication.framework bindings
+objc2-foundation = "0.3"      # NSError, NSString
 ```
 
-The `keyring` crate stays for the non-biometric item. `security-framework` is only compiled on macOS.
+The `keyring` crate stays for the non-biometric item. The macOS-only dependencies are only compiled on macOS. The `objc2` family provides safe-ish Objective-C interop for `LAContext` without manual FFI.
 
 ## Testing Strategy (TDD)
 
@@ -293,6 +318,9 @@ The `security-framework` calls are wrapped behind a trait so cache and routing l
 - Migration: existing credentials with refresh token get split when Touch ID is available
 - Migration: credentials without refresh token are unchanged
 - `--no-touchid` flag causes `verify()` to return `Ok(())` without prompting
+- `load_secure()` returns `None` when biometric enrollment has changed (fingerprints removed after setup) -- refresh flow falls back to browser login
+- `store_secure()` failure does not remove refresh token from regular keychain (no data loss)
+- `verify()` returns appropriate error when Touch ID is locked out after too many failures
 
 ### Integration tests
 
@@ -309,6 +337,28 @@ The `security-framework` calls are wrapped behind a trait so cache and routing l
 - `auth token` after 5 min: Touch ID prompt
 - Cancel Touch ID: command aborts with clear error message
 - `logout` clears both Keychain items and session cache
+- Biometric enrollment changed after storing refresh token: graceful fallback to browser login
+- Touch ID locked out (too many failures): clear error message with recovery instructions
+
+## Error Handling
+
+| Scenario | Behavior | User-facing message |
+|----------|----------|---------------------|
+| Touch ID cancelled by user | Abort command | "Touch ID verification cancelled." |
+| Touch ID locked out (too many failures) | Abort command | "Touch ID is locked. Use your device passcode to unlock, then try again." |
+| Biometric enrollment changed (fingerprints removed/re-enrolled) | `load_secure()` returns `None`, fall back to browser login | "Touch ID enrollment changed. Please log in again: magelab login" |
+| Biometric Keychain item corrupted | `load_secure()` returns `None`, fall back to browser login | (silent fallback, no user-facing error) |
+| `store_secure()` fails during save | Keep refresh token in regular keychain, log warning | "Warning: Could not store credentials in biometric keychain. Touch ID refresh will not be available." |
+| No Touch ID hardware | All biometric functions no-op | (no message, silent fallback) |
+| Non-interactive terminal (piped stdin) | `is_available()` returns `false` | (no message, silent fallback) |
+
+## Limitations
+
+1. **Session cache same-UID trust boundary.** The session cache file can be forged by any process running as the same user. This is an accepted limitation -- a same-UID attacker already has access to process memory and the regular keychain. Touch ID primarily protects against different users, remote attackers with the credential file, or unauthorized access on a locked machine.
+
+2. **Web login does not return a refresh token.** The default login method (`magelab login` / `login_web()`) currently returns credentials with `refresh_token: None`. This means use case #3 (biometric-gated token refresh) only works for users who logged in via Google OAuth or Magic Auth. Web login users still get use cases #1 (credential access protection) and #2 (sensitive operation gating), but will fall back to browser re-login when the JWT expires. To enable use case #3 for Web login, the web app backend would need to issue refresh tokens during the CLI code exchange flow -- this is a backend change outside the scope of this spec.
+
+3. **`kSecAccessControlBiometryCurrentSet` invalidation.** If a user removes all enrolled fingerprints or adds new ones after the biometric Keychain item was created, the item becomes inaccessible (`errSecAuthFailed`). The CLI handles this gracefully by falling back to browser login, but the user must re-authenticate.
 
 ## Future: Cross-Platform Biometrics
 
@@ -316,5 +366,7 @@ The `Tier`/`verify()` API is designed to be platform-agnostic. Future work could
 
 - **Windows Hello** (`#[cfg(target_os = "windows")]`): use the Windows Hello biometric API via `windows` crate to protect credential access. Same two-item Keychain split, using Windows Credential Manager with `NCRYPT_PIN_CACHE_APPLICATION_TICKET_PROPERTY`.
 - **Linux fprintd** (`#[cfg(target_os = "linux")]`): use `fprintd` D-Bus API via `zbus` crate for fingerprint verification. Session cache works the same way. Availability check includes whether `fprintd` is running and a fingerprint is enrolled.
+
+The `robius-authentication` crate is a potential unifying option that wraps macOS Touch ID, Windows Hello, and Linux polkit behind a single API. Worth evaluating when cross-platform biometrics become a priority.
 
 Each platform gets its own `mod` block behind `#[cfg()]` with the same public API. The `Tier`, session cache, and `--no-touchid` flag are shared. This is out of scope for the current implementation.
