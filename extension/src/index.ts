@@ -250,46 +250,23 @@ export default async function (pi: any) {
   // 8. Register /magelab command and skill slash commands
   const commandCount = registerCommands(pi, socket);
 
-  // 8b. Stream backend agent responses to Pi
-  //     Only display via sendMessage — don't duplicate with streaming.
-  //     The backend sends assistant_stream (tokens) AND assistant (final).
-  //     We use assistant_stream for status only, assistant for display.
+  // 8b. Backend agent response status
+  //     The backend streams responses over WebSocket and Pi's TUI renders
+  //     them directly. We only manage the status line here — no sendMessage
+  //     to avoid duplicating the response.
   let magelabMode = true;
-  let streamedResponse = false;
 
   socket.on("assistant_stream", (msg: any) => {
     if (!sessionCtx?.hasUI) return;
     if (msg.phase === "start") {
-      streamedResponse = true;
       sessionCtx.ui.setStatus("magelab-agent", "MageLab agent responding...");
     } else if (msg.phase === "end") {
       sessionCtx.ui.setStatus("magelab-agent", undefined);
     }
   });
 
-  socket.on("assistant", (msg: any) => {
-    if (!magelabMode) return; // Only display when we're routing to backend
-    if (!sessionCtx?.hasUI || !msg.text) return;
-
-    // If we already streamed this response, the backend also sent a
-    // non-streaming "assistant" with the full text — skip it to avoid
-    // duplicates.
-    if (streamedResponse) {
-      streamedResponse = false;
-      return;
-    }
-
-    pi.sendMessage({
-      customType: "magelab-agent",
-      content: msg.text,
-      display: true,
-    });
-    sessionCtx.ui.setStatus("magelab-agent", undefined);
-  });
-
   socket.on("assistant_complete", () => {
     if (!sessionCtx?.hasUI) return;
-    streamedResponse = false;
     sessionCtx.ui.setStatus("magelab-agent", undefined);
   });
 
