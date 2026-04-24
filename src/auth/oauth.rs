@@ -3,7 +3,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::net::TcpListener;
 use std::str::FromStr;
 use workos::sso::ClientId;
@@ -35,9 +35,9 @@ const SIGNUP_URL: &str = "https://magelab.ai/signup";
 /// Login method selection
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LoginMethod {
-    /// Google OAuth via browser
+    /// Google OAuth via browser (legacy — requires gateway WorkOS API key)
     Google,
-    /// Magic auth code via email
+    /// Magic auth code via email (legacy — requires gateway WorkOS API key)
     MagicAuth,
     /// Web-based login via the MageLab web app (browser → encrypted code exchange)
     #[default]
@@ -125,24 +125,22 @@ async fn login_web() -> Result<Credentials> {
         urlencoding::encode(&cli_token_url)
     );
 
-    eprintln!("Opening browser for login...");
-    eprintln!("If browser doesn't open, visit:\n{}\n", sign_in_url);
+    crate::ui::label("open", &sign_in_url);
     open::that(&sign_in_url).ok();
 
-    eprintln!("Waiting for authentication...");
+    let sp = crate::ui::spinner("Waiting for authentication...");
     let code = wait_for_code_callback(listener)?;
+    sp.finish_and_clear();
 
-    // Exchange the signed code for the actual token.
-    // State acts as a secret — only we know it, so intercepting the
-    // redirect URL alone is not enough to exchange the code.
-    eprintln!("Exchanging code...");
+    let sp = crate::ui::spinner("Exchanging code...");
     let creds = exchange_cli_code(&base, &code, &state).await?;
+    sp.finish_and_clear();
 
     creds.save()?;
     if let Some(ref email) = creds.email {
-        eprintln!("Logged in as {}!", email);
+        crate::ui::success(&format!("Logged in as {email}"));
     }
-    eprintln!("Credentials saved to {}", Credentials::path()?.display());
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
 }
 
@@ -266,23 +264,22 @@ pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Resul
     })
 }
 
-/// Magic Auth login — public entry point
-pub async fn magic_login(gateway_url: &str) -> Result<Credentials> {
-    login_magic_auth(gateway_url).await
-}
 
 /// Magic Auth login flow — exchanges code through the gateway
 async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     let http = reqwest::Client::new();
     let cid = client_id();
 
-    let email = prompt("Email:");
+    let email = if std::io::stdin().is_terminal() {
+        crate::ui::animated_prompt("Email:")
+    } else {
+        prompt("Email:")
+    };
     if email.is_empty() {
         anyhow::bail!("Email is required");
     }
 
-    // Send magic auth code via gateway
-    eprintln!("Sending login code to {}...", email);
+    let sp = crate::ui::spinner(&format!("Sending code to {email}..."));
     let resp = http
         .post(format!("{}/magic-auth", auth_base_url(gateway_url)))
         .json(&serde_json::json!({
@@ -294,6 +291,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
         .context("Failed to send magic auth code")?;
 
     if !resp.status().is_success() {
+        sp.finish_and_clear();
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         if body.contains("user_not_found") || status.as_u16() == 404 {
@@ -302,7 +300,11 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
             println!("  1) Sign in with Google (creates account automatically)");
             println!("  2) Sign up at {}", SIGNUP_URL);
             println!();
-            let choice = prompt("Choose [1/2]:");
+            let choice = if std::io::stdin().is_terminal() {
+                crate::ui::animated_prompt("Choose [1/2]:")
+            } else {
+                prompt("Choose [1/2]:")
+            };
             match choice.as_str() {
                 "1" | "" => return login_google(gateway_url).await,
                 _ => {
@@ -314,15 +316,17 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
         anyhow::bail!("Failed to send magic auth code ({}): {}", status, body);
     }
 
-    // Prompt for code
-    eprintln!("Code sent! Check your inbox.");
-    let code_input = prompt("Code:");
+    sp.finish_with_message("Code sent! Check your inbox.");
+    let code_input = if std::io::stdin().is_terminal() {
+        crate::ui::animated_prompt("Code:")
+    } else {
+        prompt("Code:")
+    };
     if code_input.is_empty() {
         anyhow::bail!("Code is required");
     }
 
-    // Exchange magic auth code for tokens via gateway
-    eprintln!("Authenticating...");
+    let sp = crate::ui::spinner("Authenticating...");
     let creds = exchange_token(
         gateway_url,
         &serde_json::json!({
@@ -333,12 +337,13 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
         }),
     )
     .await?;
+    sp.finish_and_clear();
 
     creds.save()?;
     if let Some(ref email) = creds.email {
-        eprintln!("Logged in as {}!", email);
+        crate::ui::success(&format!("Logged in as {email}"));
     }
-    eprintln!("Credentials saved to {}", Credentials::path()?.display());
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
 }
 
@@ -374,19 +379,18 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
         .get_authorization_url(&params)
         .context("Failed to build WorkOS authorization URL")?;
 
-    eprintln!("Opening browser for login...");
-    eprintln!("If browser doesn't open, visit:\n{}\n", authorize_url);
+    crate::ui::label("open", authorize_url.as_str());
     open::that(authorize_url.as_str()).ok();
 
-    eprintln!("Waiting for authentication...");
+    let sp = crate::ui::spinner("Waiting for authentication...");
     let (code, returned_state) = wait_for_callback(listener)?;
+    sp.finish_and_clear();
 
     if returned_state != state {
         anyhow::bail!("OAuth state mismatch — possible CSRF attack");
     }
 
-    // Exchange code for tokens via gateway (NOT directly with WorkOS)
-    eprintln!("Exchanging authorization code...");
+    let sp = crate::ui::spinner("Exchanging authorization code...");
     let creds = exchange_token(
         gateway_url,
         &serde_json::json!({
@@ -398,12 +402,13 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
         }),
     )
     .await?;
+    sp.finish_and_clear();
 
     creds.save()?;
     if let Some(ref email) = creds.email {
-        eprintln!("Logged in as {}!", email);
+        crate::ui::success(&format!("Logged in as {email}"));
     }
-    eprintln!("Credentials saved to {}", Credentials::path()?.display());
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
 }
 

@@ -5,3 +5,4 @@ pub mod config;
 pub mod connect;
 pub mod detect;
 pub mod settings;
+pub mod ui;

@@ -5,6 +5,7 @@ mod config;
 mod connect;
 mod detect;
 mod settings;
+mod ui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -27,7 +28,7 @@ struct Cli {
 enum Commands {
     /// Authenticate with MageLab
     Login {
-        /// Login method: web (browser), google, or magic (email code)
+        /// Login method: web (default), google (legacy), magic (legacy)
         #[arg(long, default_value = "web")]
         method: String,
         /// Show current auth status
@@ -295,13 +296,15 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
     })?;
 
     let _child = detect::launch_backend_headless(&home)?;
-    eprintln!("Backend starting...");
 
     if wait {
+        let sp = ui::spinner("Starting backend...");
         detect::wait_for_backend(&config.local_url, std::time::Duration::from_secs(30)).await?;
-        println!("{}", config.local_url);
+        sp.finish_and_clear();
+        ui::success(&format!("Backend ready at {}", config.local_url));
     } else {
-        println!("Backend launched. Use 'magelab status' to check health.");
+        ui::success("Backend launched");
+        ui::label("check", "magelab status");
     }
 
     Ok(())
