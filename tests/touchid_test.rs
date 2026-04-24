@@ -36,3 +36,88 @@ fn clear_returns_ok_when_not_available() {
     assert!(result.is_ok());
     touchid::set_disabled(false);
 }
+
+mod session_cache_tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::TempDir;
+
+    use magelab_cli::auth::touchid::session_cache;
+
+    #[test]
+    fn cache_is_invalid_when_file_missing() {
+        let dir = TempDir::new().unwrap();
+        assert!(!session_cache::is_valid_in(dir.path()));
+    }
+
+    #[test]
+    fn cache_is_valid_after_touch() {
+        let dir = TempDir::new().unwrap();
+        session_cache::touch_in(dir.path()).unwrap();
+        assert!(session_cache::is_valid_in(dir.path()));
+    }
+
+    #[test]
+    fn cache_is_invalid_after_expiry() {
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join("touchid-session");
+        let old_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 360;
+        fs::write(&cache_path, old_ts.to_string()).unwrap();
+        assert!(!session_cache::is_valid_in(dir.path()));
+    }
+
+    #[test]
+    fn cache_is_invalid_with_garbage_content() {
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join("touchid-session");
+        fs::write(&cache_path, "not-a-number").unwrap();
+        assert!(!session_cache::is_valid_in(dir.path()));
+    }
+
+    #[test]
+    fn cache_is_deleted_by_delete() {
+        let dir = TempDir::new().unwrap();
+        session_cache::touch_in(dir.path()).unwrap();
+        assert!(dir.path().join("touchid-session").exists());
+        session_cache::delete_in(dir.path());
+        assert!(!dir.path().join("touchid-session").exists());
+    }
+
+    #[test]
+    fn cache_file_has_restrictive_permissions() {
+        let dir = TempDir::new().unwrap();
+        session_cache::touch_in(dir.path()).unwrap();
+        let cache_path = dir.path().join("touchid-session");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::metadata(&cache_path).unwrap().permissions();
+            assert_eq!(perms.mode() & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn cache_respects_custom_ttl_env() {
+        let dir = TempDir::new().unwrap();
+        let cache_path = dir.path().join("touchid-session");
+        let recent_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 2;
+        fs::write(&cache_path, recent_ts.to_string()).unwrap();
+
+        // With default TTL (300s), this should be valid
+        assert!(session_cache::is_valid_in(dir.path()));
+
+        // With TTL of 1 second, this should be invalid
+        std::env::set_var("MAGELAB_TOUCHID_TTL", "1");
+        assert!(!session_cache::is_valid_in(dir.path()));
+        std::env::remove_var("MAGELAB_TOUCHID_TTL");
+    }
+}
