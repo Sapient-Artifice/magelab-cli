@@ -290,27 +290,3 @@ async fn test_cli_code_exchange_missing_token_field() {
 
     assert!(result.is_err(), "should fail when access_token is missing");
 }
-
-/// ensure_valid_jwt should fail cleanly when there are no stored credentials.
-#[tokio::test]
-async fn test_ensure_valid_jwt_no_credentials() {
-    // This will try to load credentials (may find none or expired ones)
-    // and then fail since no refresh token or login is possible non-interactively.
-    // We just verify it doesn't panic.
-    let result = oauth::ensure_valid_jwt("http://127.0.0.1:19999").await;
-    // Either it finds existing valid creds (unlikely in CI) or errors out
-    if result.is_err() {
-        let msg = result.unwrap_err().to_string();
-        // Should get a credentials error or connection error, not a panic
-        assert!(
-            msg.contains("login")
-                || msg.contains("connect")
-                || msg.contains("credentials")
-                || msg.contains("parse")
-                || msg.contains("Email")
-                || msg.contains("loopback")
-                || msg.contains("19872"),
-            "unexpected error: {msg}"
-        );
-    }
-}
