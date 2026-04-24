@@ -1,15 +1,36 @@
+// AUTO-GENERATED from schemas/websocket/protocol.json
+// Do not edit manually. Run: npx tsx schemas/codegen.ts
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Messages sent from CLI to backend via WebSocket
+/// Messages sent from client to backend via WebSocket
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 #[allow(dead_code)]
 pub enum OutgoingMessage {
-    /// Send a text chat message (backend expects type:"text", field:"text")
     #[serde(rename = "text")]
-    Chat { text: String },
+    TextMessage {
+        text: String,
+    },
+
+    #[serde(rename = "audio")]
+    AudioMessage {},
+
+    #[serde(rename = "get_runtime_config")]
+    GetRuntimeConfig {},
+
+    #[serde(rename = "get_tools")]
+    GetTools {},
+
+    #[serde(rename = "tool_call")]
+    ToolCallRequest {
+        call_id: String,
+        function_name: String,
+        #[serde(default)]
+        arguments: Option<HashMap<String, Value>>,
+    },
 
     #[serde(rename = "confirmation_response")]
     ConfirmationResponse {
@@ -18,38 +39,47 @@ pub enum OutgoingMessage {
         remember: bool,
     },
 
-    #[serde(rename = "get_runtime_config")]
-    GetRuntimeConfig,
-
     #[serde(rename = "set_model")]
-    SetModel { model: String },
+    SetModel {
+        model: String,
+    },
 
     #[serde(rename = "set_voice")]
-    SetVoice { voice: String },
+    SetVoice {
+        voice: String,
+    },
 
     #[serde(rename = "get_models")]
-    GetModels { endpoint: String, api_key: String },
+    GetModels {
+        endpoint: String,
+        api_key: String,
+    },
 
     #[serde(rename = "new_chat")]
-    NewChat,
+    NewChat {},
 
     #[serde(rename = "get_chats")]
-    GetChats,
+    GetChats {},
 
     #[serde(rename = "set_chat")]
-    SetChat { history_path: String },
+    SetChat {
+        history_path: String,
+    },
 
     #[serde(rename = "control")]
-    Control { action: String },
+    Control {
+        action: String,
+    },
 
-    #[serde(rename = "get_tools")]
-    GetTools,
+    #[serde(rename = "lifecycle")]
+    Lifecycle {
+        #[serde(default)]
+        action: Option<String>,
+    },
 
-    #[serde(rename = "tool_call")]
-    ToolCall {
-        call_id: String,
-        function_name: String,
-        arguments: HashMap<String, Value>,
+    #[serde(rename = "cancel_subagent")]
+    CancelSubagent {
+        task_id: String,
     },
 }
 
@@ -58,7 +88,6 @@ pub enum OutgoingMessage {
 #[serde(tag = "type")]
 #[allow(dead_code)]
 pub enum IncomingMessage {
-    /// Streaming response: phase="start"|"delta"|"end", with stream_id
     #[serde(rename = "assistant_stream")]
     AssistantStream {
         phase: String,
@@ -74,18 +103,15 @@ pub enum IncomingMessage {
         stream_id: Option<String>,
     },
 
-    /// Non-streaming complete response
     #[serde(rename = "assistant")]
     Assistant {
         #[serde(default)]
         text: Option<String>,
     },
 
-    /// Signals the assistant response is fully complete
     #[serde(rename = "assistant_complete")]
     AssistantComplete {},
 
-    /// Echo of the user's transcribed/typed text
     #[serde(rename = "transcription")]
     Transcription {
         #[serde(default)]
@@ -99,7 +125,7 @@ pub enum IncomingMessage {
         #[serde(default)]
         script: Option<String>,
         #[serde(default)]
-        arguments: HashMap<String, Value>,
+        arguments: Option<HashMap<String, Value>>,
     },
 
     #[serde(rename = "tool_result")]
@@ -118,7 +144,39 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "runtime_config")]
-    RuntimeConfig(HashMap<String, Value>),
+    RuntimeConfig {
+        #[serde(default)]
+        llm_provider_name: Option<String>,
+        #[serde(default)]
+        llm_endpoint: Option<String>,
+        #[serde(default)]
+        llm_model_name: Option<String>,
+        #[serde(default)]
+        voice_model: Option<String>,
+        #[serde(default)]
+        tts_stream: Option<bool>,
+        #[serde(default)]
+        mute: Option<bool>,
+        #[serde(default)]
+        history_path: Option<String>,
+        #[serde(default)]
+        list_files: Option<Vec<String>>,
+    },
+
+    #[serde(rename = "tools_list")]
+    ToolsList {
+        tools: Vec<Value>,
+    },
+
+    #[serde(rename = "tool_call_result")]
+    ToolCallResult {
+        call_id: String,
+        success: bool,
+        #[serde(default)]
+        result: Option<Value>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 
     #[serde(rename = "set_model_result")]
     SetModelResult {
@@ -130,13 +188,7 @@ pub enum IncomingMessage {
     #[serde(rename = "models_result")]
     ModelsResult {
         #[serde(default)]
-        models: Vec<String>,
-    },
-
-    #[serde(rename = "error")]
-    Error {
-        #[serde(default)]
-        message: Option<String>,
+        models: Option<Vec<String>>,
     },
 
     #[serde(rename = "new_chat_result")]
@@ -148,40 +200,31 @@ pub enum IncomingMessage {
     #[serde(rename = "chat_list_result")]
     ChatListResult {
         #[serde(default)]
-        ok: bool,
+        ok: Option<bool>,
         #[serde(default)]
         history_path: Option<String>,
         #[serde(default)]
-        chats: Vec<String>,
+        chats: Option<Vec<String>>,
     },
 
     #[serde(rename = "chat_switch_result")]
     ChatSwitchResult {
         #[serde(default)]
-        ok: bool,
+        ok: Option<bool>,
         #[serde(default)]
         history_path: Option<String>,
         #[serde(default)]
         error: Option<String>,
     },
 
-    #[serde(rename = "notify")]
-    Notify { title: String, body: String },
-
-    #[serde(rename = "open_url")]
-    OpenUrl { url: String },
-
-    #[serde(rename = "open_file")]
-    OpenFile { filepath: String },
-
     #[serde(rename = "token_count")]
     TokenCount {
         #[serde(default)]
-        sys_count: i64,
+        sys_count: Option<i64>,
         #[serde(default)]
-        win_count: i64,
+        win_count: Option<i64>,
         #[serde(default)]
-        total_count: i64,
+        total_count: Option<i64>,
     },
 
     #[serde(rename = "subagent_update")]
@@ -208,14 +251,30 @@ pub enum IncomingMessage {
         error: Option<String>,
     },
 
+    #[serde(rename = "notify")]
+    Notify {
+        title: String,
+        body: String,
+    },
+
+    #[serde(rename = "open_url")]
+    OpenUrl {
+        url: String,
+    },
+
+    #[serde(rename = "open_file")]
+    OpenFile {
+        filepath: String,
+    },
+
     #[serde(rename = "broker_status")]
     BrokerStatus {
         #[serde(default)]
-        devices: Vec<String>,
+        devices: Option<Vec<String>>,
         #[serde(default)]
         bound_device_id: Option<String>,
         #[serde(default)]
-        connected: bool,
+        connected: Option<bool>,
     },
 
     #[serde(rename = "bind_result")]
@@ -227,26 +286,15 @@ pub enum IncomingMessage {
     #[serde(rename = "broker_error")]
     BrokerError {
         #[serde(default)]
-        code: String,
+        code: Option<String>,
         #[serde(default)]
-        message: String,
+        message: Option<String>,
     },
 
-    #[serde(rename = "tools_list")]
-    ToolsList {
+    #[serde(rename = "error")]
+    ErrorMessage {
         #[serde(default)]
-        tools: Vec<Value>,
-    },
-
-    #[serde(rename = "tool_call_result")]
-    ToolCallResult {
-        call_id: String,
-        #[serde(default)]
-        success: bool,
-        #[serde(default)]
-        result: Option<Value>,
-        #[serde(default)]
-        error: Option<String>,
+        message: Option<String>,
     },
 
     #[serde(rename = "ping")]
