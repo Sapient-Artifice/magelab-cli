@@ -129,8 +129,12 @@ async fn login_web() -> Result<Credentials> {
     open::that(&sign_in_url).ok();
 
     let sp = crate::ui::spinner("Waiting for authentication...");
-    let code = wait_for_code_callback(listener)?;
+    let (code, returned_state) = wait_for_code_callback(listener)?;
     sp.finish_and_clear();
+
+    if returned_state != state {
+        anyhow::bail!("OAuth state mismatch — possible CSRF attack");
+    }
 
     let sp = crate::ui::spinner("Exchanging code...");
     let creds = exchange_cli_code(&base, &code, &state).await?;
@@ -145,9 +149,9 @@ async fn login_web() -> Result<Credentials> {
 }
 
 /// Wait for the web app to redirect to our loopback with an encrypted code.
-/// State is NOT in the URL — only the CLI knows it.
+/// Returns (code, state) — caller must verify state matches the original.
 /// Times out after 3 minutes.
-fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
+fn wait_for_code_callback(listener: TcpListener) -> Result<(String, String)> {
     use std::time::{Duration, Instant};
 
     let deadline = Instant::now() + Duration::from_secs(180);
@@ -186,6 +190,12 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         .map(|(_, v)| v.to_string())
         .context("No code in callback — login may have failed")?;
 
+    let returned_state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_default();
+
     let response = concat!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
@@ -218,7 +228,7 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     );
     stream.write_all(response.as_bytes()).ok();
 
-    Ok(code)
+    Ok((code, returned_state))
 }
 
 /// Exchange an encrypted CLI code for credentials via POST to the web app.
@@ -252,8 +262,8 @@ pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Resul
     let email = data["email"].as_str().map(String::from);
     let user_id = data["user_id"].as_str().map(String::from);
 
-    // WorkOS access tokens typically expire in 5 minutes
-    let expires_at = chrono::Utc::now().timestamp() + 300;
+    let expires_in = data["expires_in"].as_i64().unwrap_or(300);
+    let expires_at = chrono::Utc::now().timestamp() + expires_in;
 
     Ok(Credentials {
         access_token: Some(access_token),
@@ -263,7 +273,6 @@ pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Resul
         email,
     })
 }
-
 
 /// Magic Auth login flow — exchanges code through the gateway
 async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
@@ -530,15 +539,31 @@ pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
     let creds = Credentials::load()?;
 
     if creds.is_token_valid() {
-        return Ok(creds.access_token.unwrap());
+        return creds
+            .access_token
+            .ok_or_else(|| anyhow::anyhow!("Token marked valid but access_token is missing"));
     }
 
+    // Try biometric-protected refresh token first
+    if let Ok(Some(bio_refresh)) = super::touchid::load_secure() {
+        if let Ok(new_creds) = refresh_token(gateway_url, &bio_refresh).await {
+            return new_creds
+                .access_token
+                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
+        }
+    }
+
+    // Fall back to regular refresh token
     if let Some(ref rt) = creds.refresh_token {
         if let Ok(new_creds) = refresh_token(gateway_url, rt).await {
-            return Ok(new_creds.access_token.unwrap());
+            return new_creds
+                .access_token
+                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
         }
     }
 
     let new_creds = login(gateway_url).await?;
-    Ok(new_creds.access_token.unwrap())
+    new_creds
+        .access_token
+        .ok_or_else(|| anyhow::anyhow!("Login succeeded but no access_token returned"))
 }

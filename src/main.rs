@@ -481,6 +481,20 @@ async fn get_token(config: &Config) -> Result<String> {
         if creds.is_token_valid() {
             return Ok(token.clone());
         }
+
+        // Try biometric-protected refresh token first
+        if let Ok(Some(bio_refresh)) = auth::touchid::load_secure() {
+            if let Ok(new_creds) =
+                auth::oauth::refresh_token(&config.gateway_url, &bio_refresh).await
+            {
+                let _ = new_creds.save();
+                if let Some(t) = new_creds.access_token {
+                    return Ok(t);
+                }
+            }
+        }
+
+        // Fall back to regular refresh token
         if let Some(refresh) = &creds.refresh_token {
             if let Ok(new_creds) = auth::oauth::refresh_token(&config.gateway_url, refresh).await {
                 let _ = new_creds.save();
