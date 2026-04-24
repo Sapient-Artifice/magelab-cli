@@ -121,13 +121,15 @@ export default async function (pi: any) {
 
   // 4. Permission gate for tool confirmations
   const autoApprove = loadAutoApproveList();
+  const sessionApproved = new Set<string>(); // tools approved for this session
   let sessionCtx: any = null;
 
   socket.on("confirmation_request", (msg) => {
     const req = msg as ConfirmationRequest;
+    const tool = req.function_name;
 
-    if (autoApprove.has(req.function_name)) {
-      // Auto-approved tool — no prompt needed
+    // Check persistent auto-approve list and session-approved set
+    if (autoApprove.has(tool) || sessionApproved.has(tool)) {
       socket.send({
         type: "confirmation_response",
         confirmation_id: req.confirmation_id,
@@ -137,24 +139,47 @@ export default async function (pi: any) {
       return;
     }
 
-    // Ask user via Pi's confirm dialog
+    // Ask user via Pi's select dialog: Always / This session / Deny
     if (sessionCtx?.hasUI) {
       const detail = req.script
-        ? `${req.function_name}: ${req.script}`
-        : `${req.function_name}(${JSON.stringify(req.arguments || {}).slice(0, 200)})`;
+        ? `${tool}: ${req.script}`
+        : `${tool}(${JSON.stringify(req.arguments || {}).slice(0, 200)})`;
 
       sessionCtx.ui
-        .confirm(`Allow ${req.function_name}?`, detail)
-        .then((confirmed: boolean) => {
-          socket.send({
-            type: "confirmation_response",
-            confirmation_id: req.confirmation_id,
-            confirmed,
-            remember: false,
-          });
+        .select(`Allow ${tool}?  ${detail}`, [
+          "Always",
+          "This session",
+          "No",
+        ])
+        .then((choice: string | undefined) => {
+          if (choice === "Always") {
+            autoApprove.add(tool);
+            sessionApproved.add(tool);
+            socket.send({
+              type: "confirmation_response",
+              confirmation_id: req.confirmation_id,
+              confirmed: true,
+              remember: true,
+            });
+          } else if (choice === "This session") {
+            sessionApproved.add(tool);
+            socket.send({
+              type: "confirmation_response",
+              confirmation_id: req.confirmation_id,
+              confirmed: true,
+              remember: false,
+            });
+          } else {
+            // "No" or dismissed
+            socket.send({
+              type: "confirmation_response",
+              confirmation_id: req.confirmation_id,
+              confirmed: false,
+              remember: false,
+            });
+          }
         })
         .catch(() => {
-          // Dialog dismissed — deny
           socket.send({
             type: "confirmation_response",
             confirmation_id: req.confirmation_id,
