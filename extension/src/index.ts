@@ -37,8 +37,8 @@ export default async function (pi: any) {
   try {
     // @ts-ignore — resolved at runtime by Pi's jiti loader
     const { Box, Markdown, Container, Spacer } = await import("@mariozechner/pi-tui");
-    // @ts-ignore — resolved at runtime by Pi's jiti loader
     const { getMarkdownTheme, theme } = await import(
+      // @ts-ignore — resolved at runtime by Pi's jiti loader
       "@mariozechner/pi-coding-agent/dist/modes/interactive/theme/theme.js"
     );
 
