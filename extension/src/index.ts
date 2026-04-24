@@ -388,16 +388,24 @@ export default async function (pi: any) {
                 }
               });
 
-              // Tool execution status
+              // Tool execution status — use setWorkingMessage which
+              // is visible during streaming (setStatus is not)
               socket.on("confirmation_request", (msg: any) => {
                 if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setStatus("magelab-tool", `${msg.function_name}...`);
+                  sessionCtx.ui.setWorkingMessage(`Running ${msg.function_name}...`);
                 }
               });
 
               socket.on("tool_result", (msg: any) => {
                 if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setStatus("magelab-tool", undefined);
+                  const name = msg.function_name || "tool";
+                  sessionCtx.ui.setWorkingMessage(`${name} done`);
+                }
+              });
+
+              socket.on("tool_debug", (msg: any) => {
+                if (sessionCtx?.hasUI && msg.content) {
+                  sessionCtx.ui.setWorkingMessage(msg.content.slice(0, 80));
                 }
               });
 
@@ -407,13 +415,13 @@ export default async function (pi: any) {
                   const label = msg.progress
                     ? `${msg.name}: ${msg.progress}`
                     : `${msg.name}: ${msg.status || "running"}`;
-                  sessionCtx.ui.setStatus("magelab-subagent", label);
+                  sessionCtx.ui.setWorkingMessage(label);
                 }
               });
 
               socket.on("subagent_complete", (msg: any) => {
                 if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
+                  sessionCtx.ui.setWorkingMessage(`${msg.name}: done`);
                 }
               });
 
