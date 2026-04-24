@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getConnection } from "./connection.js";
-import { BackendSocket, type ConfirmationRequestMessage } from "./websocket.js";
+import { BackendSocket, type ConfirmationRequest } from "./websocket.js";
 import { registerBackendTools } from "./tools.js";
 import { ensureGatewayProvider } from "./gateway.js";
 
@@ -65,7 +65,7 @@ export default async function (pi: any) {
   let sessionCtx: any = null;
 
   socket.on("confirmation_request", (msg) => {
-    const req = msg as ConfirmationRequestMessage;
+    const req = msg as ConfirmationRequest;
 
     if (autoApprove.has(req.function_name)) {
       // Auto-approved tool — no prompt needed

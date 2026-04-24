@@ -1,5 +1,5 @@
 import { Type, type TSchema, type TObject, type TProperties } from "@sinclair/typebox";
-import type { BackendSocket, ToolSchema, ToolsListMessage } from "./websocket.js";
+import type { BackendSocket, ToolSchema, ToolsList } from "./websocket.js";
 
 // Backend tool names that Pi handles natively — do not register these.
 const SKIP_TOOLS = new Set([
@@ -16,14 +16,14 @@ export async function registerBackendTools(
   pi: any, // ExtensionAPI — typed as any to avoid hard dep on Pi types
   socket: BackendSocket
 ): Promise<number> {
-  const response = await socket.requestByType<ToolsListMessage>(
+  const response = await socket.requestByType<ToolsList>(
     { type: "get_tools" },
     "tools_list"
   );
 
   let registered = 0;
 
-  for (const tool of response.tools) {
+  for (const tool of response.tools as unknown as ToolSchema[]) {
     const fn = tool.function;
     if (!fn?.name || SKIP_TOOLS.has(fn.name)) continue;
 

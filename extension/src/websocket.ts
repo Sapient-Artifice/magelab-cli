@@ -1,69 +1,22 @@
 import WebSocket from "ws";
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import { randomUUID } from "node:crypto";
+import type {
+  ClientMessage,
+  ServerMessage,
+  GetTools,
+  ToolCallRequest,
+  ConfirmationResponse,
+  ToolCallResult,
+  ToolsList,
+  ConfirmationRequest,
+  ErrorMessage,
+} from "./protocol.js";
 
-// -- Outgoing messages (client -> backend) --
+// Re-export protocol types used by other modules
+export type { ConfirmationRequest, ToolCallResult, ToolsList, ServerMessage, ClientMessage };
 
-export interface GetToolsMessage {
-  type: "get_tools";
-}
-
-export interface ToolCallMessage {
-  type: "tool_call";
-  call_id: string;
-  function_name: string;
-  arguments: Record<string, unknown>;
-}
-
-export interface ConfirmationResponseMessage {
-  type: "confirmation_response";
-  confirmation_id: string;
-  confirmed: boolean;
-  remember: boolean;
-}
-
-export type OutgoingMessage =
-  | GetToolsMessage
-  | ToolCallMessage
-  | ConfirmationResponseMessage;
-
-// -- Incoming messages (backend -> client) --
-
-export interface ToolsListMessage {
-  type: "tools_list";
-  tools: ToolSchema[];
-}
-
-export interface ToolCallResultMessage {
-  type: "tool_call_result";
-  call_id: string;
-  success: boolean;
-  result?: unknown;
-  error?: string;
-}
-
-export interface ConfirmationRequestMessage {
-  type: "confirmation_request";
-  confirmation_id: string;
-  function_name: string;
-  script?: string;
-  arguments?: Record<string, unknown>;
-}
-
-export interface ErrorMessage {
-  type: "error";
-  message?: string;
-}
-
-export type IncomingMessage =
-  | ToolsListMessage
-  | ToolCallResultMessage
-  | ConfirmationRequestMessage
-  | ErrorMessage
-  | { type: string; [key: string]: unknown };
-
-// -- Tool schema (OpenAI function-calling format) --
-
+// ToolSchema is a nested shape within ToolsList — not in the protocol schema
 export interface ToolSchema {
   type: "function";
   function: {
@@ -80,7 +33,7 @@ export interface ToolSchema {
 // -- Pending request tracker --
 
 interface PendingRequest {
-  resolve: (msg: IncomingMessage) => void;
+  resolve: (msg: ServerMessage) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -91,7 +44,7 @@ export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 
 export class BackendSocket {
   private ws: ReconnectingWebSocket;
-  private handlers = new Map<string, ((msg: IncomingMessage) => void)[]>();
+  private handlers = new Map<string, ((msg: ServerMessage) => void)[]>();
   private pendingByCallId = new Map<string, PendingRequest>();
   private pendingByType = new Map<string, PendingRequest>();
   private _closed = false;
@@ -105,7 +58,7 @@ export class BackendSocket {
       try {
         const msg = JSON.parse(
           typeof event.data === "string" ? event.data : event.data.toString()
-        ) as IncomingMessage;
+        ) as ServerMessage;
         this.dispatch(msg);
       } catch {
         // Ignore unparseable messages
@@ -142,7 +95,6 @@ export class BackendSocket {
   ): Promise<BackendSocket> {
     return new Promise((resolve, reject) => {
       const protocols: string[] = [];
-      // partysocket uses WebSocket constructor from ws
       const ws = new ReconnectingWebSocket(url, protocols, {
         WebSocket: WebSocket as any,
         maxRetries: 3,
@@ -152,8 +104,6 @@ export class BackendSocket {
         startClosed: false,
       });
 
-      // Set auth header via protocol hack — partysocket doesn't support headers directly.
-      // Override the internal URL to include token as query param for relay mode.
       if (token && url.includes("?")) {
         // Relay URLs already have query params (ws_ticket), token goes as header
         // For now, skip header-based auth in partysocket (works for local mode)
@@ -187,7 +137,7 @@ export class BackendSocket {
     this._onStateChange = cb;
   }
 
-  send(msg: OutgoingMessage): void {
+  send(msg: ClientMessage): void {
     if (this._closed) return;
     this.ws.send(JSON.stringify(msg));
   }
@@ -196,13 +146,13 @@ export class BackendSocket {
     functionName: string,
     args: Record<string, unknown>,
     timeoutMs = DEFAULT_TIMEOUT_MS
-  ): Promise<ToolCallResultMessage> {
+  ): Promise<ToolCallResult> {
     if (this._closed) {
       return Promise.reject(new Error("Backend disconnected"));
     }
 
     const callId = randomUUID();
-    const msg: ToolCallMessage = {
+    const msg: ToolCallRequest = {
       type: "tool_call",
       call_id: callId,
       function_name: functionName,
@@ -216,7 +166,7 @@ export class BackendSocket {
       }, timeoutMs);
 
       this.pendingByCallId.set(callId, {
-        resolve: resolve as (msg: IncomingMessage) => void,
+        resolve: resolve as (msg: ServerMessage) => void,
         reject,
         timer,
       });
@@ -224,8 +174,8 @@ export class BackendSocket {
     });
   }
 
-  requestByType<T extends IncomingMessage>(
-    msg: OutgoingMessage,
+  requestByType<T extends ServerMessage>(
+    msg: ClientMessage,
     expectedType: string,
     timeoutMs = 30_000
   ): Promise<T> {
@@ -240,7 +190,7 @@ export class BackendSocket {
       }, timeoutMs);
 
       this.pendingByType.set(expectedType, {
-        resolve: resolve as (msg: IncomingMessage) => void,
+        resolve: resolve as (msg: ServerMessage) => void,
         reject,
         timer,
       });
@@ -248,7 +198,7 @@ export class BackendSocket {
     });
   }
 
-  on(type: string, handler: (msg: IncomingMessage) => void): void {
+  on(type: string, handler: (msg: ServerMessage) => void): void {
     const list = this.handlers.get(type) || [];
     list.push(handler);
     this.handlers.set(type, list);
@@ -263,7 +213,7 @@ export class BackendSocket {
     }
   }
 
-  private dispatch(msg: IncomingMessage): void {
+  private dispatch(msg: ServerMessage): void {
     if ("call_id" in msg && typeof msg.call_id === "string") {
       const pending = this.pendingByCallId.get(msg.call_id);
       if (pending) {
