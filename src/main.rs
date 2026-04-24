@@ -21,6 +21,10 @@ use config::Config;
     about = "MageLab CLI — infrastructure management for MageLab"
 )]
 struct Cli {
+    /// Skip Touch ID verification
+    #[arg(long, global = true)]
+    no_touchid: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -143,6 +147,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
+    // Set Touch ID disable flag before any command dispatch
+    auth::touchid::set_disabled(cli.no_touchid);
+
     match cli.command {
         Commands::Login { method, status } => {
             if status {
@@ -150,9 +157,15 @@ async fn main() -> Result<()> {
             }
             cmd_login(&config, &method).await
         }
-        Commands::Logout => cmd_logout(),
+        Commands::Logout => {
+            auth::touchid::verify(auth::touchid::Tier::Sensitive, "log out")?;
+            cmd_logout()
+        }
         Commands::Auth { action } => match action {
-            AuthAction::Token => cmd_auth_token(&config).await,
+            AuthAction::Token => {
+                auth::touchid::verify(auth::touchid::Tier::Cached, "access auth token")?;
+                cmd_auth_token(&config).await
+            }
         },
         Commands::Connect {
             json,
@@ -160,14 +173,39 @@ async fn main() -> Result<()> {
             local,
             relay,
             remote,
-        } => cmd_connect(&config, json, no_launch, local, relay, remote).await,
+        } => {
+            auth::touchid::verify(auth::touchid::Tier::Cached, "connect")?;
+            cmd_connect(&config, json, no_launch, local, relay, remote).await
+        }
         Commands::Launch { wait } => cmd_launch(&config, wait).await,
         Commands::Status => cmd_status(&config).await,
-        Commands::Devices { action, json } => cmd_devices(&config, action, json).await,
-        Commands::Models => cmd_account(&config, "models").await,
-        Commands::Usage => cmd_account(&config, "usage").await,
-        Commands::Balance => cmd_account(&config, "balance").await,
-        Commands::Keys { action } => cmd_keys(&config, action).await,
+        Commands::Devices { action, json } => {
+            auth::touchid::verify(auth::touchid::Tier::Cached, "access devices")?;
+            cmd_devices(&config, action, json).await
+        }
+        Commands::Models => {
+            auth::touchid::verify(auth::touchid::Tier::Cached, "access account info")?;
+            cmd_account(&config, "models").await
+        }
+        Commands::Usage => {
+            auth::touchid::verify(auth::touchid::Tier::Cached, "access account info")?;
+            cmd_account(&config, "usage").await
+        }
+        Commands::Balance => {
+            auth::touchid::verify(auth::touchid::Tier::Cached, "access account info")?;
+            cmd_account(&config, "balance").await
+        }
+        Commands::Keys { action } => {
+            match &action {
+                KeysAction::Create | KeysAction::Revoke { .. } => {
+                    auth::touchid::verify(auth::touchid::Tier::Sensitive, "manage API keys")?;
+                }
+                KeysAction::List => {
+                    auth::touchid::verify(auth::touchid::Tier::Cached, "access API keys")?;
+                }
+            }
+            cmd_keys(&config, action).await
+        }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "magelab", &mut std::io::stdout());
