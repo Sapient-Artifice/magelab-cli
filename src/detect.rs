@@ -105,12 +105,19 @@ pub async fn check_backend_health(local_url: &str) -> bool {
 
 /// Find the mage-lab installation directory
 pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
-    // 1. MAGELAB_HOME env var
+    // 1. MAGELAB_HOME env var (highest priority)
     if let Ok(home) = std::env::var("MAGELAB_HOME") {
         return Some(PathBuf::from(home));
     }
 
-    // 2. Sibling directory relative to CLI binary
+    // 2. Config file override (user explicitly set magelab_home)
+    if let Some(override_path) = config_override {
+        if !override_path.is_empty() {
+            return Some(PathBuf::from(override_path));
+        }
+    }
+
+    // 3. Sibling directory relative to CLI binary
     if let Ok(exe) = std::env::current_exe() {
         let sibling = exe
             .parent()
@@ -123,21 +130,10 @@ pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
         }
     }
 
-    // 3. Platform-specific default paths
-    for path in platform_default_paths() {
-        if path.join("backend").join("main.py").exists() {
-            return Some(path);
-        }
-    }
-
-    // 4. Config file override
-    if let Some(override_path) = config_override {
-        if !override_path.is_empty() {
-            return Some(PathBuf::from(override_path));
-        }
-    }
-
-    None
+    // 4. Platform-specific default paths
+    platform_default_paths()
+        .into_iter()
+        .find(|path| path.join("backend").join("main.py").exists())
 }
 
 fn platform_default_paths() -> Vec<PathBuf> {
@@ -173,12 +169,25 @@ fn platform_default_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// Launch the Python backend in headless mode
-pub fn launch_backend_headless(magelab_home: &Path) -> Result<Child> {
+/// Launch the Python backend in headless mode.
+/// `port` is extracted from the configured local_url so it stays in sync.
+pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> {
     let backend_dir = magelab_home.join("backend");
 
     // Try to find Python in the mage-lab venv first, then system
     let python = find_python(&backend_dir);
+
+    // Log backend output to ~/.config/magelab/backend.log
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
+        .join("magelab");
+    std::fs::create_dir_all(&log_dir).ok();
+    let log_path = log_dir.join("backend.log");
+    let log_file = std::fs::File::create(&log_path)
+        .unwrap_or_else(|_| std::fs::File::create("/dev/null").unwrap());
+    let log_file_err = log_file.try_clone().unwrap_or_else(|_| {
+        std::fs::File::create("/dev/null").unwrap()
+    });
 
     let child = Command::new(&python)
         .args([
@@ -188,28 +197,48 @@ pub fn launch_backend_headless(magelab_home: &Path) -> Result<Child> {
             "--host",
             "127.0.0.1",
             "--port",
-            "11115",
+            &port.to_string(),
             "--log-level",
             "warning",
         ])
         .current_dir(&backend_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file_err))
         .spawn()
         .with_context(|| format!("Failed to launch backend from {}", backend_dir.display()))?;
 
     Ok(child)
 }
 
-fn find_python(backend_dir: &Path) -> String {
-    // Check for venv
+/// Extract the port from an http(s) URL, defaulting to 11115.
+pub fn port_from_url(url: &str) -> u16 {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.port())
+        .unwrap_or(11115)
+}
+
+pub fn find_python(backend_dir: &Path) -> String {
+    // Check for venv — path differs by platform
+    #[cfg(not(target_os = "windows"))]
     let venv_python = backend_dir.join(".venv").join("bin").join("python");
+    #[cfg(target_os = "windows")]
+    let venv_python = backend_dir.join(".venv").join("Scripts").join("python.exe");
+
     if venv_python.exists() {
         return venv_python.to_string_lossy().into();
     }
+
     // Fallback to system
-    "python3".to_string()
+    #[cfg(not(target_os = "windows"))]
+    {
+        "python3".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "python".to_string()
+    }
 }
 
 /// Poll the backend health endpoint until it's ready
