@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::touchid;
+
 const KEYCHAIN_SERVICE: &str = "magelab-cli";
 const KEYCHAIN_ACCOUNT: &str = "default";
 
@@ -59,6 +61,15 @@ impl Credentials {
         // Try keychain
         if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
             if entry.set_password(&json).is_ok() {
+                // If Touch ID is available and we have a refresh token,
+                // store it in the biometric-protected keychain item
+                if let Some(ref rt) = self.refresh_token {
+                    if touchid::is_available() {
+                        if let Err(e) = touchid::store_secure(rt) {
+                            eprintln!("Warning: Could not store credentials in biometric keychain. Touch ID refresh will not be available. ({})", e);
+                        }
+                    }
+                }
                 return Ok(());
             }
         }
@@ -82,6 +93,9 @@ impl Credentials {
 
     /// Clear stored credentials from both keychain and file
     pub fn clear() -> Result<()> {
+        // Clear Touch ID biometric item and session cache
+        touchid::clear()?;
+
         // Try keychain
         if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
             entry.delete_credential().ok();

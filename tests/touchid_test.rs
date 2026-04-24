@@ -121,3 +121,31 @@ mod session_cache_tests {
         std::env::remove_var("MAGELAB_TOUCHID_TTL");
     }
 }
+
+mod credential_integration_tests {
+    use magelab_cli::auth::credentials::Credentials;
+    use magelab_cli::auth::touchid;
+
+    #[test]
+    fn save_with_touchid_disabled_preserves_refresh_token_in_regular_store() {
+        touchid::set_disabled(true);
+
+        let creds = Credentials {
+            access_token: Some("test-access".to_string()),
+            refresh_token: Some("test-refresh".to_string()),
+            expires_at: Some(9999999999),
+            user_id: Some("user-1".to_string()),
+            email: Some("test@example.com".to_string()),
+        };
+
+        let result = creds.save();
+        assert!(result.is_ok());
+
+        let loaded = Credentials::load().unwrap();
+        assert_eq!(loaded.refresh_token.as_deref(), Some("test-refresh"));
+
+        // Clean up
+        Credentials::clear().ok();
+        touchid::set_disabled(false);
+    }
+}
