@@ -98,7 +98,10 @@ pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Resul
 
 /// Web-based login — two-phase code exchange via the MageLab web app.
 ///
-/// Security: the access token never appears in URLs, browser history, or logs.
+/// Security: the access token is AES-256-GCM encrypted in transit. The state
+/// parameter IS visible in the browser address bar/history (it's part of the
+/// returnTo URL), but exploiting this requires BOTH the state AND the encrypted
+/// code (which only appears in the loopback redirect to 127.0.0.1:19872).
 ///
 /// Flow:
 ///   1. CLI generates a random `state` and binds loopback on :19872
@@ -172,6 +175,7 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         }
     };
 
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -190,8 +194,7 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         .map(|(_, v)| v.to_string())
         .context("No code in callback — login may have failed")?;
 
-    let response = concat!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+    let body = concat!(
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
         "<meta name=\"referrer\" content=\"no-referrer\">",
@@ -219,6 +222,11 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         "<p>You can close this tab and return to the terminal.</p>",
         "<div class=\"hint\">magelab cli</div>",
         "</div></body></html>",
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
     );
     stream.write_all(response.as_bytes()).ok();
 
@@ -259,7 +267,8 @@ pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Resul
     let email = data["email"].as_str().map(String::from);
     let user_id = data["user_id"].as_str().map(String::from);
 
-    let expires_in = data["expires_in"].as_i64().unwrap_or(300);
+    // Server includes expires_in from JWT exp claim when available
+    let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
     let expires_at = chrono::Utc::now().timestamp() + expires_in;
 
     Ok(Credentials {
@@ -481,9 +490,27 @@ fn generate_state() -> String {
 }
 
 fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
-    listener.set_nonblocking(false)?;
-    let (mut stream, _) = listener.accept().context("No callback received")?;
+    use std::time::{Duration, Instant};
 
+    let deadline = Instant::now() + Duration::from_secs(180);
+    listener.set_nonblocking(true)?;
+
+    let (mut stream, _) = loop {
+        match listener.accept() {
+            Ok(conn) => break conn,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "Login timed out — no response received within 3 minutes. Try again."
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        }
+    };
+
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -508,7 +535,12 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
         .map(|(_, v)| v.to_string())
         .unwrap_or_default();
 
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
+    let body = "<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
+    );
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
