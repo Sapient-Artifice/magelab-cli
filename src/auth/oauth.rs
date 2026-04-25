@@ -103,8 +103,9 @@ pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Resul
 /// Flow:
 ///   1. CLI generates a random `state` and binds loopback on :19872
 ///   2. Browser opens to {web_url}/auth/sign-in → user authenticates
-///   3. Web app mints a one-time code, redirects to loopback with ?code=...&state=...
-///   4. CLI verifies state, then POSTs the code back to exchange for the actual token
+///   3. Web app encrypts token with AES-256-GCM (key = server_secret + state),
+///      redirects to loopback with ?code=<encrypted>
+///   4. CLI POSTs {code, state} back — web app re-derives the key and decrypts
 async fn login_web() -> Result<Credentials> {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
         .context("Failed to start loopback server on port 19872 — is another instance running?")?;
@@ -129,13 +130,12 @@ async fn login_web() -> Result<Credentials> {
     open::that(&sign_in_url).ok();
 
     let sp = crate::ui::spinner("Waiting for authentication...");
-    let (code, returned_state) = wait_for_code_callback(listener)?;
+    let code = wait_for_code_callback(listener)?;
     sp.finish_and_clear();
 
-    if returned_state != state {
-        anyhow::bail!("OAuth state mismatch — possible CSRF attack");
-    }
-
+    // State is verified implicitly: the web app encrypts the token using
+    // AES-256-GCM with a key derived from (server_secret + state). If the
+    // state is wrong, decryption fails in the POST exchange below.
     let sp = crate::ui::spinner("Exchanging code...");
     let creds = exchange_cli_code(&base, &code, &state).await?;
     sp.finish_and_clear();
@@ -149,9 +149,9 @@ async fn login_web() -> Result<Credentials> {
 }
 
 /// Wait for the web app to redirect to our loopback with an encrypted code.
-/// Returns (code, state) — caller must verify state matches the original.
+/// Returns the code. State is verified implicitly during decryption in exchange_cli_code.
 /// Times out after 3 minutes.
-fn wait_for_code_callback(listener: TcpListener) -> Result<(String, String)> {
+fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     use std::time::{Duration, Instant};
 
     let deadline = Instant::now() + Duration::from_secs(180);
@@ -190,12 +190,6 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<(String, String)> {
         .map(|(_, v)| v.to_string())
         .context("No code in callback — login may have failed")?;
 
-    let returned_state = url
-        .query_pairs()
-        .find(|(k, _)| k == "state")
-        .map(|(_, v)| v.to_string())
-        .unwrap_or_default();
-
     let response = concat!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
@@ -228,7 +222,7 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<(String, String)> {
     );
     stream.write_all(response.as_bytes()).ok();
 
-    Ok((code, returned_state))
+    Ok(code)
 }
 
 /// Exchange an encrypted CLI code for credentials via POST to the web app.
@@ -243,9 +237,12 @@ pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Resul
         .await
         .context("Failed to exchange code with web app")?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 410 {
+            anyhow::bail!("Login code expired — the 60-second window elapsed. Please try again.");
+        }
         anyhow::bail!("Code exchange failed ({}): {}", status, body);
     }
 
