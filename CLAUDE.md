@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## What This Is
 
-Rust CLI for MageLab — infrastructure management tool. Binary name: `magelab`. Handles auth, backend detection/launch, account management, config, and device management. NOT a coding agent — the agent experience is provided by the Pi coding agent with the `@magelab/agent` extension.
+Rust CLI for MageLab — infrastructure management tool. Binary name: `mage`. Handles auth, backend detection/launch, account management, config, and device management. NOT a coding agent — the agent experience is provided by the Pi coding agent with the `@magelab/agent` extension.
 
 ## Build & Development Commands
 
@@ -31,16 +31,16 @@ Lean infrastructure CLI. No REPL, no rendering, no streaming.
 ### Commands
 
 ```
-magelab login/logout           # WorkOS OAuth or magic auth
-magelab auth token             # Print JWT to stdout (for Pi extension)
-magelab connect [--json]       # Resolve backend connection
-magelab launch [--wait]        # Start headless backend
-magelab status                 # Health check
-magelab devices                # List/bind/detach relay devices
-magelab models/usage/balance   # Account info
-magelab keys list/create/revoke
-magelab config [set <k> <v>]
-magelab version
+mage login/logout           # WorkOS OAuth or magic auth
+mage auth token             # Print JWT to stdout (for Pi extension)
+mage connect [--json]       # Resolve backend connection
+mage launch [--wait]        # Start headless backend
+mage status                 # Health check
+mage devices                # List/bind/detach relay devices
+mage models/usage/balance   # Account info
+mage keys list/create/revoke
+mage config [set <k> <v>]
+mage version
 ```
 
 ### Module Layout

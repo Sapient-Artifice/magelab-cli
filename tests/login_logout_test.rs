@@ -146,7 +146,7 @@ fn test_expired_credentials_are_invalid() {
 /// Logout via CLI should succeed even when not logged in.
 #[test]
 fn test_logout_succeeds_when_not_logged_in() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
         .assert()
@@ -158,13 +158,13 @@ fn test_logout_succeeds_when_not_logged_in() {
 #[test]
 fn test_login_status_after_logout() {
     // Logout first to ensure clean state
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
         .assert()
         .success();
 
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
         .env_remove("MAGELAB_API_KEY")
@@ -176,7 +176,7 @@ fn test_login_status_after_logout() {
 /// Login --status shows API key preview when MAGELAB_API_KEY is set.
 #[test]
 fn test_login_status_shows_api_key() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
         .env("MAGELAB_API_KEY", "sk-test-1234567890abcdef")

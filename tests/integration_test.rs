@@ -3,17 +3,17 @@ use predicates::prelude::*;
 
 #[test]
 fn test_version_command() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("version")
         .assert()
         .success()
-        .stdout(predicate::str::starts_with("magelab "));
+        .stdout(predicate::str::starts_with("mage "));
 }
 
 #[test]
 fn test_help_shows_subcommands() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("--help")
         .assert()
@@ -27,7 +27,7 @@ fn test_help_shows_subcommands() {
 
 #[test]
 fn test_connect_help() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["connect", "--help"])
         .assert()
@@ -38,7 +38,7 @@ fn test_connect_help() {
 
 #[test]
 fn test_config_shows_path() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("config")
         .assert()
@@ -48,7 +48,7 @@ fn test_config_shows_path() {
 
 #[test]
 fn test_auth_token_fails_when_not_logged_in() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["auth", "token"])
         .assert()
@@ -57,7 +57,7 @@ fn test_auth_token_fails_when_not_logged_in() {
 
 #[test]
 fn test_login_status_when_not_logged_in() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
         .env_remove("MAGELAB_API_KEY")
@@ -68,7 +68,7 @@ fn test_login_status_when_not_logged_in() {
 
 #[test]
 fn test_models_without_auth_fails() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("models")
         .env_remove("MAGELAB_API_KEY")

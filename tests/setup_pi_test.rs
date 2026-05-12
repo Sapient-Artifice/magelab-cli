@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 #[test]
 fn test_setup_pi_help() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["setup-pi", "--help"])
         .assert()
@@ -16,7 +16,7 @@ fn test_setup_pi_help() {
 
 #[test]
 fn test_setup_pi_shows_in_help() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("--help")
         .assert()
@@ -27,7 +27,7 @@ fn test_setup_pi_shows_in_help() {
 #[test]
 fn test_setup_pi_detects_missing_pi_and_npm() {
     // Override PATH to ensure neither `pi` nor `npm`/`pnpm` are found
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("setup-pi")
         .env("PATH", "/nonexistent")
@@ -41,7 +41,7 @@ fn test_setup_pi_detects_missing_pi_and_npm() {
 fn test_setup_pi_offers_install_when_npm_available() {
     // Pi not on PATH but npm is — should prompt to install
     // We pass "n" via stdin to decline
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .arg("setup-pi")
         .env(
@@ -58,7 +58,7 @@ fn test_setup_pi_offers_install_when_npm_available() {
 fn test_setup_pi_uninstall_when_not_installed() {
     let tmp = TempDir::new().unwrap();
 
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["setup-pi", "--uninstall"])
         .env("HOME", tmp.path())
@@ -74,7 +74,7 @@ fn test_setup_pi_uninstall_removes_directory() {
     fs::create_dir_all(&ext_dir).unwrap();
     fs::write(ext_dir.join("index.ts"), "// test").unwrap();
 
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["setup-pi", "--uninstall"])
         .env("HOME", tmp.path())

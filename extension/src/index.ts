@@ -483,8 +483,8 @@ export default async function (pi: any) {
         const { existsSync: ex } = await import("node:fs");
         const { join: j } = await import("node:path");
         const { homedir: hd } = await import("node:os");
-        const cargoPath = j(hd(), ".cargo", "bin", "magelab");
-        const bin = ex(cargoPath) ? cargoPath : "magelab";
+        const cargoPath = j(hd(), ".cargo", "bin", "mage");
+        const bin = ex(cargoPath) ? cargoPath : "mage";
         const { stdout } = await p(ef)(bin, ["balance"]);
         const balanceMatch = stdout.match(/(\$[\d.]+|\d+\.\d+)/);
         if (balanceMatch) {
@@ -523,12 +523,12 @@ export default async function (pi: any) {
 
     if (event.status === 402) {
       ctx.ui.notify(
-        "MageLab: no credits remaining. Add credits at magelab.ai or run: magelab balance",
+        "MageLab: no credits remaining. Add credits at magelab.ai or run: mage balance",
         "error"
       );
     } else if (event.status === 401) {
       ctx.ui.notify(
-        "MageLab: authentication failed. Run: magelab login",
+        "MageLab: authentication failed. Run: mage login",
         "error"
       );
     } else if (event.status === 429) {

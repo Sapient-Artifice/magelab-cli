@@ -235,12 +235,12 @@ log_test "T0b: cargo install"
 out=$(expect_success "install to cargo bin" cargo install --path . --force) || true
 
 # Resolve binary
-if command -v magelab &>/dev/null; then
-    MAGELAB="magelab"
-elif [[ -f "$CLI_DIR/target/release/magelab" ]]; then
-    MAGELAB="$CLI_DIR/target/release/magelab"
+if command -v mage &>/dev/null; then
+    MAGELAB="mage"
+elif [[ -f "$CLI_DIR/target/release/mage" ]]; then
+    MAGELAB="$CLI_DIR/target/release/mage"
 else
-    echo "ERROR: magelab binary not found after install"
+    echo "ERROR: mage binary not found after install"
     exit 1
 fi
 log_info "Using binary: $(command -v "$MAGELAB" || echo "$MAGELAB")"
@@ -248,7 +248,7 @@ log_info "Using binary: $(command -v "$MAGELAB" || echo "$MAGELAB")"
 # Version
 log_test "T0c: version"
 out=$($MAGELAB version 2>&1)
-assert_matches "$out" '^magelab [0-9]+\.' "version output"
+assert_matches "$out" '^mage [0-9]+\.' "version output"
 
 # ── T8: Logout (clean slate)
 log_test "T8: Logout"

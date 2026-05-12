@@ -32,11 +32,11 @@ export function validateConnectionInfo(data: unknown): ConnectionInfo {
   return obj as unknown as ConnectionInfo;
 }
 
-/** Find the magelab binary: PATH first, then ~/.cargo/bin/ */
+/** Find the mage binary: PATH first, then ~/.cargo/bin/ */
 function findMagelabBinary(): string {
-  const cargoPath = join(homedir(), ".cargo", "bin", "magelab");
+  const cargoPath = join(homedir(), ".cargo", "bin", "mage");
   if (existsSync(cargoPath)) return cargoPath;
-  return "magelab"; // hope it's on PATH
+  return "mage"; // hope it's on PATH
 }
 
 /**
@@ -52,10 +52,10 @@ export async function getConnection(): Promise<ConnectionInfo> {
   } catch (err: any) {
     if (err.code === "ENOENT") {
       throw new Error(
-        "magelab CLI not found. Install: cargo install --path /path/to/magelab-cli"
+        "mage CLI not found. Install: cargo install --path /path/to/magelab-cli"
       );
     }
     const stderr = err.stderr?.trim() || err.message;
-    throw new Error(`magelab connect failed: ${stderr}`);
+    throw new Error(`mage connect failed: ${stderr}`);
   }
 }

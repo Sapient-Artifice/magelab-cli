@@ -16,7 +16,7 @@ use config::Config;
 
 #[derive(Parser)]
 #[command(
-    name = "magelab",
+    name = "mage",
     version,
     about = "MageLab CLI — infrastructure management for MageLab"
 )]
@@ -211,14 +211,14 @@ async fn main() -> Result<()> {
             clap_complete::generate(
                 shell,
                 &mut Cli::command(),
-                "magelab",
+                "mage",
                 &mut std::io::stdout(),
             );
             Ok(())
         }
         Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
         Commands::Version => {
-            println!("magelab {}", env!("CARGO_PKG_VERSION"));
+            println!("mage {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
     }
@@ -269,14 +269,14 @@ async fn cmd_auth_token(config: &Config) -> Result<()> {
                 return Ok(());
             }
         }
-        anyhow::bail!("Token expired and refresh failed. Run: magelab login");
+        anyhow::bail!("Token expired and refresh failed. Run: mage login");
     }
     match &creds.access_token {
         Some(token) => {
             print!("{}", token);
             Ok(())
         }
-        None => anyhow::bail!("Not logged in. Run: magelab login"),
+        None => anyhow::bail!("Not logged in. Run: mage login"),
     }
 }
 
@@ -339,7 +339,7 @@ async fn cmd_connect(
             ),
             "relay" => println!("Connected: relay via gateway"),
             "remote" => println!("Connected: gateway REST (chat only)"),
-            "none" => println!("No connection available. Run: magelab login"),
+            "none" => println!("No connection available. Run: mage login"),
             _ => println!("Mode: {}", result.mode),
         }
         if let Some(model) = &result.model {
@@ -366,7 +366,7 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         ui::success(&format!("Backend ready at {}", config.local_url));
     } else {
         ui::success("Backend launched");
-        ui::label("check", "magelab status");
+        ui::label("check", "mage status");
     }
 
     Ok(())
@@ -403,7 +403,7 @@ async fn cmd_devices(config: &Config, action: Option<DevicesAction>, json: bool)
     let jwt = creds
         .access_token
         .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run: magelab login"))?;
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run: mage login"))?;
 
     match action {
         None => {
@@ -511,7 +511,7 @@ async fn get_token(config: &Config) -> Result<String> {
     }
     config
         .api_key()
-        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: magelab login"))
+        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: mage login"))
 }
 
 // -- Extension files embedded at compile time --
@@ -578,7 +578,7 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
             println!("Neither pnpm nor npm found. Install Node.js first:");
             println!("  https://nodejs.org/");
             println!();
-            println!("Then run: magelab setup-pi");
+            println!("Then run: mage setup-pi");
             return Ok(());
         }
 
@@ -595,7 +595,7 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
             println!("Install Pi manually:");
             println!("  {pkg_mgr} install -g @mariozechner/pi-coding-agent");
             println!();
-            println!("Then run: magelab setup-pi");
+            println!("Then run: mage setup-pi");
             return Ok(());
         }
 
@@ -721,7 +721,7 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     println!("  ----------");
     if !backend_running {
         println!("  1. Start MageLab backend:");
-        println!("     magelab launch --wait");
+        println!("     mage launch --wait");
         println!("  2. Start Pi (MageLab tools auto-register):");
         println!("     pi");
     } else {

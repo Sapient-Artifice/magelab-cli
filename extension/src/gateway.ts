@@ -18,11 +18,11 @@ const execFileAsync = promisify(execFile);
 const GATEWAY_URL = "https://api.magelab.ai/v1";
 const PROVIDER_NAME = "magelab";
 
-/** Find the magelab binary: ~/.cargo/bin/ first, then PATH */
+/** Find the mage binary: ~/.cargo/bin/ first, then PATH */
 function findBinary(): string {
-  const cargoPath = join(homedir(), ".cargo", "bin", "magelab");
+  const cargoPath = join(homedir(), ".cargo", "bin", "mage");
   if (existsSync(cargoPath)) return cargoPath;
-  return "magelab";
+  return "mage";
 }
 
 /**
@@ -72,7 +72,7 @@ async function getCredential(): Promise<{ key: string; isJwt: boolean }> {
   const token = stdout.trim();
   if (token) return { key: token, isJwt: true };
 
-  throw new Error("No API key or auth token found — run: magelab login");
+  throw new Error("No API key or auth token found — run: mage login");
 }
 
 /**

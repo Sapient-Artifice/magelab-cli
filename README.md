@@ -11,54 +11,54 @@ Infrastructure management tool for MageLab. Handles authentication, backend dete
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
-cargo install --path .         # Install `magelab` binary to ~/.cargo/bin
+cargo install --path .         # Install `mage` binary to ~/.cargo/bin
 ```
 
 ## Running
 
 ```bash
-magelab --help                 # Show all commands
-magelab version                # Print version
+mage --help                 # Show all commands
+mage version                # Print version
 
 # Authentication
-magelab login                  # Browser-based OAuth login (default)
-magelab login --method magic   # Email magic-code login
-magelab login --status         # Show current auth status
-magelab logout                 # Clear stored credentials
-magelab auth token             # Print JWT to stdout (for piping)
+mage login                  # Browser-based OAuth login (default)
+mage login --method magic   # Email magic-code login
+mage login --status         # Show current auth status
+mage logout                 # Clear stored credentials
+mage auth token             # Print JWT to stdout (for piping)
 
 # Connection management
-magelab connect                # Auto-resolve: local → relay → remote
-magelab connect --json         # Output as JSON (for programmatic use)
-magelab connect --local        # Force local backend only
-magelab connect --relay        # Force relay mode only
-magelab connect --remote       # Force remote REST mode only
-magelab connect --no-launch    # Don't auto-launch backend
+mage connect                # Auto-resolve: local → relay → remote
+mage connect --json         # Output as JSON (for programmatic use)
+mage connect --local        # Force local backend only
+mage connect --relay        # Force relay mode only
+mage connect --remote       # Force remote REST mode only
+mage connect --no-launch    # Don't auto-launch backend
 
 # Backend management
-magelab launch                 # Start headless backend
-magelab launch --wait          # Start and block until healthy
-magelab status                 # Show backend health and auth info
+mage launch                 # Start headless backend
+mage launch --wait          # Start and block until healthy
+mage status                 # Show backend health and auth info
 
 # Device management
-magelab devices                # List online relay devices
-magelab devices --json         # Output as JSON
-magelab devices bind <id>      # Bind to a specific device
-magelab devices detach         # Unbind from current device
+mage devices                # List online relay devices
+mage devices --json         # Output as JSON
+mage devices bind <id>      # Bind to a specific device
+mage devices detach         # Unbind from current device
 
 # Account info (requires auth)
-magelab models                 # List available models
-magelab usage                  # Show token usage summary
-magelab balance                # Show account credit balance
+mage models                 # List available models
+mage usage                  # Show token usage summary
+mage balance                # Show account credit balance
 
 # API key management
-magelab keys list              # List API keys
-magelab keys create            # Create a new API key
-magelab keys revoke <id>       # Revoke an API key
+mage keys list              # List API keys
+mage keys create            # Create a new API key
+mage keys revoke <id>       # Revoke an API key
 
 # Configuration
-magelab config                 # Show current config and file path
-magelab config set <key> <val> # Set a config value
+mage config                 # Show current config and file path
+mage config set <key> <val> # Set a config value
 ```
 
 ## Pi Extension
@@ -69,10 +69,10 @@ The CLI includes `@magelab/agent`, a [Pi coding agent](https://github.com/badlog
 
 ```bash
 # 1. One command installs everything (Pi + extension + dependencies)
-magelab setup-pi
+mage setup-pi
 
 # 2. Start MageLab backend (if not already running)
-magelab launch --wait
+mage launch --wait
 
 # 3. Start Pi — MageLab tools auto-register
 pi
@@ -103,13 +103,13 @@ ln -s "$(pwd)/extension" ~/.pi/agent/extensions/magelab-agent
 ### Managing the Extension
 
 ```bash
-magelab setup-pi               # Install/reinstall
-magelab setup-pi --uninstall   # Remove extension
+mage setup-pi               # Install/reinstall
+mage setup-pi --uninstall   # Remove extension
 ```
 
 ### How It Works
 
-On Pi startup, the extension calls `magelab connect --json --no-launch` to find the backend, opens a WebSocket, and registers all non-native backend tools with Pi. Tools like `read_file`, `write_file`, and `run_bash` are skipped (Pi handles those natively).
+On Pi startup, the extension calls `mage connect --json --no-launch` to find the backend, opens a WebSocket, and registers all non-native backend tools with Pi. Tools like `read_file`, `write_file`, and `run_bash` are skipped (Pi handles those natively).
 
 ## Configuration
 
