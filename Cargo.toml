@@ -10,7 +10,7 @@ keywords = ["ai", "cli", "llm", "chat"]
 categories = ["command-line-utilities"]
 
 [[bin]]
-name = "magelab"
+name = "mage"
 path = "src/main.rs"
 
 [dependencies]

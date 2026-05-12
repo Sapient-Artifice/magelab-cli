@@ -15,19 +15,19 @@ jobs:
         include:
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: magelab-macos-x86_64
+            name: mage-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: magelab-macos-aarch64
+            name: mage-macos-aarch64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: magelab-linux-x86_64
+            name: mage-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: magelab-linux-aarch64
+            name: mage-linux-aarch64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            name: magelab-windows-x86_64.exe
+            name: mage-windows-x86_64.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -52,11 +52,11 @@ jobs:
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
-        run: cp target/${{ matrix.target }}/release/magelab ${{ matrix.name }}
+        run: cp target/${{ matrix.target }}/release/mage ${{ matrix.name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/magelab.exe ${{ matrix.name }}
+        run: cp target/${{ matrix.target }}/release/mage.exe ${{ matrix.name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -71,23 +71,23 @@ jobs:
       - name: Download x86_64
         uses: actions/download-artifact@v4
         with:
-          name: magelab-macos-x86_64
+          name: mage-macos-x86_64
       - name: Download aarch64
         uses: actions/download-artifact@v4
         with:
-          name: magelab-macos-aarch64
+          name: mage-macos-aarch64
 
       - name: Create universal binary
         run: |
-          chmod +x magelab-macos-x86_64 magelab-macos-aarch64
-          lipo -create -output magelab-macos-universal magelab-macos-x86_64 magelab-macos-aarch64
-          chmod +x magelab-macos-universal
+          chmod +x mage-macos-x86_64 mage-macos-aarch64
+          lipo -create -output mage-macos-universal mage-macos-x86_64 mage-macos-aarch64
+          chmod +x mage-macos-universal
 
       - name: Upload universal binary
         uses: actions/upload-artifact@v4
         with:
-          name: magelab-macos-universal
-          path: magelab-macos-universal
+          name: mage-macos-universal
+          path: mage-macos-universal
 
   release:
     needs: [build, macos-universal]
@@ -112,10 +112,10 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/magelab-macos-universal/magelab-macos-universal
-            artifacts/magelab-macos-x86_64/magelab-macos-x86_64
-            artifacts/magelab-macos-aarch64/magelab-macos-aarch64
-            artifacts/magelab-linux-x86_64/magelab-linux-x86_64
-            artifacts/magelab-linux-aarch64/magelab-linux-aarch64
-            artifacts/magelab-windows-x86_64.exe/magelab-windows-x86_64.exe
+            artifacts/mage-macos-universal/mage-macos-universal
+            artifacts/mage-macos-x86_64/mage-macos-x86_64
+            artifacts/mage-macos-aarch64/mage-macos-aarch64
+            artifacts/mage-linux-x86_64/mage-linux-x86_64
+            artifacts/mage-linux-aarch64/mage-linux-aarch64
+            artifacts/mage-windows-x86_64.exe/mage-windows-x86_64.exe
             artifacts/checksums.txt

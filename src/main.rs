@@ -24,7 +24,7 @@ use repl::input::{parse_slash_command, SlashCommand};
 
 #[derive(Parser)]
 #[command(
-    name = "magelab",
+    name = "mage",
     version,
     about = "MageLab CLI — LLM chat and agentic tool use"
 )]
@@ -155,7 +155,7 @@ async fn resolve_auto_mode(config: &Config) -> Result<detect::ResolvedConnection
     }
 
     // 5. No auth at all → prompt login
-    println!("No local backend, no credentials. Run `magelab login` to authenticate,");
+    println!("No local backend, no credentials. Run `mage login` to authenticate,");
     println!("or set an API key in ~/.config/magelab/cli.toml");
     anyhow::bail!("No authentication configured")
 }
@@ -187,7 +187,7 @@ async fn handle_subcommand(cmd: &Commands, config: &mut Config) -> Result<()> {
                 let contents = std::fs::read_to_string(&path)?;
                 println!("{}", contents);
             } else {
-                println!("(not yet created — run magelab to set up)");
+                println!("(not yet created — run mage to set up)");
             }
             return Ok(());
         }
