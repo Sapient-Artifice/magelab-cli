@@ -190,7 +190,7 @@ pub async fn refresh_token(refresh_token: &str) -> Result<Credentials> {
         .context("Failed to refresh token")?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("Token refresh failed — please run `magelab login` again");
+        anyhow::bail!("Token refresh failed — please run `mage login` again");
     }
 
     let body: serde_json::Value = resp.json().await?;

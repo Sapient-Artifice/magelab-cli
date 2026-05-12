@@ -11,18 +11,18 @@ cargo install --path .
 ## Usage
 
 ```bash
-magelab                          # REPL mode
-magelab "explain this error"     # One-shot chat
-magelab -m gpt-4o "..."         # Choose model
-magelab --local                  # Force local backend
-magelab --remote                 # Force gateway API
-magelab --yolo                   # Auto-approve all tools
+mage                          # REPL mode
+mage "explain this error"     # One-shot chat
+mage -m gpt-4o "..."         # Choose model
+mage --local                  # Force local backend
+mage --remote                 # Force gateway API
+mage --yolo                   # Auto-approve all tools
 
-magelab models                   # List available models
-magelab usage                    # Show usage summary
-magelab balance                  # Show account balance
-magelab keys list                # List API keys
-magelab config                   # Show configuration
+mage models                   # List available models
+mage usage                    # Show usage summary
+mage balance                  # Show account balance
+mage keys list                # List API keys
+mage config                   # Show configuration
 ```
 
 ## Configuration
