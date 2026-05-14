@@ -2,8 +2,8 @@ use crate::config::Config;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-const POSTHOG_API_KEY: &str = "phc_..."; // TODO: replace with actual project key before merge
-const POSTHOG_HOST: &str = "https://us.i.posthog.com";
+const POSTHOG_API_KEY: &str = "phc_B9UYq1it1AATkn1uQ6NubnQMblUx6TBeobAcWxupebu";
+const POSTHOG_HOST: &str = "https://eu.i.posthog.com";
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Common properties attached to every analytics event.
