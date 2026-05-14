@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub api_key: Option<String>,
 
     #[serde(default = "default_model")]
@@ -120,17 +120,15 @@ impl Config {
         Ok(())
     }
 
-    /// Get effective API key: env var takes precedence over config file
+    /// Get API key from MAGELAB_API_KEY env var.
+    /// Plaintext api_key in cli.toml is deprecated — use the desktop app or env var.
     pub fn api_key(&self) -> Option<String> {
-        std::env::var("MAGELAB_API_KEY")
-            .ok()
-            .or_else(|| self.api_key.clone())
+        std::env::var("MAGELAB_API_KEY").ok()
     }
 
     /// Set a config value by key name
     pub fn set_value(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
-            "api_key" => self.api_key = Some(value.to_string()),
             "default_model" => self.default_model = value.to_string(),
             "magelab_home" => self.magelab_home = Some(value.to_string()),
             "gateway_url" => self.gateway_url = value.to_string(),

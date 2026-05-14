@@ -169,7 +169,10 @@ fn test_find_magelab_home_config_override_nonexistent_returns_none() {
     let result = detect::find_magelab_home(Some("/nonexistent/magelab/path"));
     // May still return Some if MAGELAB_HOME or sibling paths exist, but the
     // override itself should not be returned for a nonexistent path
-    assert_ne!(result, Some(std::path::PathBuf::from("/nonexistent/magelab/path")));
+    assert_ne!(
+        result,
+        Some(std::path::PathBuf::from("/nonexistent/magelab/path"))
+    );
 }
 
 #[test]

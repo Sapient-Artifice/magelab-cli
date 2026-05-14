@@ -551,4 +551,3 @@ pub async fn refresh_token(gateway_url: &str, rt: &str) -> Result<Credentials> {
     creds.save()?;
     Ok(creds)
 }
-

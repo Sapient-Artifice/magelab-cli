@@ -6,6 +6,7 @@ mod connect;
 mod detect;
 mod settings;
 mod ui;
+mod vault;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -92,6 +93,11 @@ enum Commands {
         #[command(subcommand)]
         action: KeysAction,
     },
+    /// Read secrets from the desktop app's encrypted vault
+    Vault {
+        #[command(subcommand)]
+        action: Option<VaultAction>,
+    },
     /// Show or update CLI configuration (local config file)
     Config {
         #[command(subcommand)]
@@ -116,34 +122,8 @@ enum Commands {
         #[arg(long)]
         dev: bool,
     },
-    /// Manage secrets in the Stronghold vault
-    Vault {
-        #[command(subcommand)]
-        action: VaultAction,
-    },
     /// Print version
     Version,
-}
-
-#[derive(Subcommand)]
-enum VaultAction {
-    /// List all stored secret names
-    List,
-    /// Retrieve a secret by name
-    Get {
-        /// Secret name
-        name: String,
-    },
-    /// Store a secret (prompts for value interactively)
-    Set {
-        /// Secret name
-        name: String,
-    },
-    /// Delete a secret
-    Delete {
-        /// Secret name
-        name: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -184,10 +164,29 @@ enum SettingsAction {
     },
 }
 
+#[derive(Subcommand)]
+enum VaultAction {
+    /// Print a secret value to stdout
+    Get {
+        /// Secret key name (e.g., llm_api_key, magelab_api_key)
+        key: String,
+    },
+    /// Push all vault secrets to the running local backend
+    Push,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
+
+    // Warn if plaintext API key exists in cli.toml (deprecated)
+    if config.api_key.is_some() {
+        eprintln!(
+            "Warning: Plaintext API key in cli.toml is deprecated.\n\
+             Set it in the desktop app or use MAGELAB_API_KEY env var instead."
+        );
+    }
 
     // Set Touch ID disable flag before any command dispatch
     auth::touchid::set_disabled(cli.no_touchid);
@@ -248,26 +247,11 @@ async fn main() -> Result<()> {
             }
             cmd_keys(&config, action).await
         }
-        Commands::Vault { action } => {
-            match &action {
-                VaultAction::Set { .. } | VaultAction::Delete { .. } => {
-                    auth::touchid::verify(auth::touchid::Tier::Sensitive, "manage vault secrets")?;
-                }
-                VaultAction::List | VaultAction::Get { .. } => {
-                    auth::touchid::verify(auth::touchid::Tier::Cached, "access vault")?;
-                }
-            }
-            cmd_vault(action)
-        }
+        Commands::Vault { action } => cmd_vault(&config, action).await,
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "mage",
-                &mut std::io::stdout(),
-            );
+            clap_complete::generate(shell, &mut Cli::command(), "mage", &mut std::io::stdout());
             Ok(())
         }
         Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
@@ -295,23 +279,28 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
         let valid = creds.is_token_valid();
         println!("Token: {}", if valid { "valid" } else { "expired" });
     }
+    // Show vault status
+    if let Ok(v) = vault::Vault::open() {
+        if let Ok(keys) = v.list() {
+            if !keys.is_empty() {
+                println!("Vault: {} key(s)", keys.len());
+            }
+        }
+    }
     if let Some(key) = config.api_key() {
         let preview = if key.len() > 8 {
             format!("{}...{}", &key[..4], &key[key.len() - 4..])
         } else {
             "****".to_string()
         };
-        println!("API key: {}", preview);
+        println!("API key (env): {}", preview);
     }
     Ok(())
 }
 
-fn cmd_logout(config: &Config) -> Result<()> {
+fn cmd_logout(_config: &Config) -> Result<()> {
     auth::credentials::Credentials::clear()?;
     println!("Logged out.");
-    if config.api_key().is_some() {
-        println!("Note: API key in config is still active. Use 'mage keys revoke' to deactivate it.");
-    }
     Ok(())
 }
 
@@ -372,10 +361,10 @@ async fn cmd_connect(
             };
         }
         if remote && r.mode != "remote" {
-            if let Some(api_key) = config.api_key() {
+            if let Ok(token) = get_token(config).await {
                 r = connect::ConnectResult {
                     url: Some(config.gateway_url.clone()),
-                    token: Some(api_key),
+                    token: Some(token),
                     mode: "remote".to_string(),
                     model: Some(config.default_model.clone()),
                 };
@@ -422,6 +411,17 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         detect::wait_for_backend(&config.local_url, std::time::Duration::from_secs(30)).await?;
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", config.local_url));
+
+        // Auto-push vault secrets (same as desktop's initSecrets startup flow)
+        if let Ok(v) = vault::Vault::open() {
+            if let Ok(secrets) = v.all_secrets() {
+                if !secrets.is_empty() {
+                    if let Err(e) = push_vault_secrets(config).await {
+                        eprintln!("Warning: vault push failed: {e}");
+                    }
+                }
+            }
+        }
     } else {
         ui::success("Backend launched");
         ui::label("check", "mage status");
@@ -449,8 +449,21 @@ async fn cmd_status(config: &Config) -> Result<()> {
         }
     );
 
+    match vault::Vault::open() {
+        Ok(v) => {
+            if let Ok(keys) = v.list() {
+                if !keys.is_empty() {
+                    println!("Vault: {} key(s)", keys.len());
+                }
+            }
+        }
+        Err(_) => println!("Vault: not available"),
+    }
     if let Some(key) = config.api_key() {
-        println!("API key: configured ({}...)", &key[..4.min(key.len())]);
+        println!(
+            "API key (env): configured ({}...)",
+            &key[..4.min(key.len())]
+        );
     }
 
     Ok(())
@@ -510,8 +523,100 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
     let client = RemoteClient::new(&config.gateway_url, &token);
     match action {
         KeysAction::List => account::list_keys(&client).await,
-        KeysAction::Create => account::create_key(&client).await,
+        KeysAction::Create => {
+            let new_key = account::create_key(&client).await?;
+            if let Some(key_value) = new_key {
+                // Push new key to running backend (if running)
+                let push_url = format!("{}/api/auth/push_secrets", config.local_url);
+                let body = serde_json::json!({ "secrets": { "magelab_api_key": key_value } });
+                match reqwest::Client::new()
+                    .post(&push_url)
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        println!("API key pushed to running backend.");
+                    }
+                    _ => {
+                        println!("Set this key in the desktop app to persist it in the vault.");
+                    }
+                }
+            }
+            Ok(())
+        }
         KeysAction::Revoke { id } => account::revoke_key(&client, &id).await,
+    }
+}
+
+async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
+    match action {
+        None => {
+            // mage vault — list key names
+            auth::touchid::verify(auth::touchid::Tier::Cached, "list vault keys")?;
+            let vault = vault::Vault::open().map_err(|e| match e {
+                vault::VaultError::NotFound(_) => {
+                    anyhow::anyhow!("No vault found. Open the desktop app to create one.")
+                }
+                vault::VaultError::KeychainUnavailable(_) => anyhow::anyhow!(
+                    "Vault exists but no password in keychain. Open the desktop app first, or set MAGELAB_VAULT_PASSWORD env var."
+                ),
+                other => anyhow::anyhow!("{other}"),
+            })?;
+
+            let keys = vault.list()?;
+            if keys.is_empty() {
+                println!("Vault is empty. Store secrets in the desktop app.");
+            } else {
+                for key in &keys {
+                    println!("{}", key);
+                }
+            }
+            Ok(())
+        }
+        Some(VaultAction::Get { key }) => {
+            auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
+            let vault = vault::Vault::open()?;
+            match vault.get(&key)? {
+                Some(value) => {
+                    print!("{}", value); // No newline — for piping
+                    Ok(())
+                }
+                None => anyhow::bail!("Key '{}' not found in vault", key),
+            }
+        }
+        Some(VaultAction::Push) => {
+            auth::touchid::verify(auth::touchid::Tier::Sensitive, "push vault secrets")?;
+            push_vault_secrets(config).await
+        }
+    }
+}
+
+async fn push_vault_secrets(config: &Config) -> Result<()> {
+    let vault = vault::Vault::open()?;
+    let secrets = vault.all_secrets()?;
+
+    if secrets.is_empty() {
+        println!("No secrets in vault to push.");
+        return Ok(());
+    }
+
+    let url = format!("{}/api/auth/push_secrets", config.local_url);
+    let body = serde_json::json!({ "secrets": secrets });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| anyhow::anyhow!("Backend not running. Start it with `mage launch`"))?;
+
+    if resp.status().is_success() {
+        ui::success(&format!("Pushed {} secret(s) to backend", secrets.len()));
+        Ok(())
+    } else {
+        anyhow::bail!("Push failed with status {}", resp.status())
     }
 }
 
@@ -537,58 +642,6 @@ fn cmd_config(config: &mut Config, action: Option<ConfigAction>) -> Result<()> {
     }
 }
 
-fn cmd_vault(action: VaultAction) -> Result<()> {
-    let vault_config = magelab_core::vault::VaultConfig::default_paths()
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-    let vault = magelab_core::vault::Vault::open(vault_config)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-    match action {
-        VaultAction::List => {
-            let names = vault.list().map_err(|e| anyhow::anyhow!("{}", e))?;
-            if names.is_empty() {
-                println!("No secrets stored.");
-            } else {
-                for name in &names {
-                    println!("  {}", name);
-                }
-            }
-        }
-        VaultAction::Get { name } => {
-            match vault.get(&name).map_err(|e| anyhow::anyhow!("{}", e))? {
-                Some(value) => println!("{}", value),
-                None => {
-                    eprintln!("Secret '{}' not found.", name);
-                    std::process::exit(1);
-                }
-            }
-        }
-        VaultAction::Set { name } => {
-            let value = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                ui::animated_prompt(&format!("Value for '{name}':"))
-            } else {
-                let mut buf = String::new();
-                std::io::stdin().read_line(&mut buf)?;
-                buf.trim().to_string()
-            };
-            if value.is_empty() {
-                anyhow::bail!("Value cannot be empty");
-            }
-            vault
-                .set(&name, &value)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            ui::success(&format!("Stored '{name}'"));
-        }
-        VaultAction::Delete { name } => {
-            vault
-                .delete(&name)
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
-            ui::success(&format!("Deleted '{name}'"));
-        }
-    }
-    Ok(())
-}
-
 /// Show or change backend runtime settings via WebSocket
 async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result<()> {
     use futures_util::{SinkExt, StreamExt};
@@ -604,9 +657,9 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
 
     let ws_url = connect::to_ws_url(&config.local_url);
 
-    let (mut ws, _) = connect_async(&ws_url).await.map_err(|_| {
-        anyhow::anyhow!("Backend not running. Start it with `mage launch`")
-    })?;
+    let (mut ws, _) = connect_async(&ws_url)
+        .await
+        .map_err(|_| anyhow::anyhow!("Backend not running. Start it with `mage launch`"))?;
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut got_response = false;
@@ -687,7 +740,9 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
     Ok(())
 }
 
-/// Get the best available token (JWT preferred, API key fallback)
+/// Get the best available token.
+///
+/// Fallback chain: JWT → refresh → biometric refresh → vault → MAGELAB_API_KEY env var → error
 async fn get_token(config: &Config) -> Result<String> {
     let creds = auth::credentials::Credentials::load().unwrap_or_default();
     if let Some(token) = creds.try_get_valid_jwt(&config.gateway_url).await {
@@ -696,9 +751,28 @@ async fn get_token(config: &Config) -> Result<String> {
     if creds.access_token.is_some() {
         eprintln!("Warning: JWT expired and refresh failed. Falling back to API key.");
     }
-    config
-        .api_key()
-        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: mage login"))
+
+    // Try vault
+    match vault::Vault::open() {
+        Ok(v) => {
+            if let Ok(Some(key)) = v.get("magelab_api_key") {
+                return Ok(key);
+            }
+        }
+        Err(e) => {
+            // Vault errors are debug-level — many users won't have the desktop installed
+            eprintln!("debug: vault unavailable: {e}");
+        }
+    }
+
+    // Env var fallback
+    if let Ok(key) = std::env::var("MAGELAB_API_KEY") {
+        if !key.is_empty() {
+            return Ok(key);
+        }
+    }
+
+    anyhow::bail!("Not authenticated. Run: mage login")
 }
 
 // -- Extension files embedded at compile time --
@@ -900,11 +974,8 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let config = Config::load().unwrap_or_default();
     let port = detect::port_from_url(&config.local_url);
     let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-    let backend_running = std::net::TcpStream::connect_timeout(
-        &addr,
-        std::time::Duration::from_millis(500),
-    )
-    .is_ok();
+    let backend_running =
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_ok();
 
     println!();
     println!("  Quickstart");

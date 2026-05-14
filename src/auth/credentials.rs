@@ -136,8 +136,7 @@ impl Credentials {
 
             // Try biometric-protected refresh token first
             if let Ok(Some(bio_refresh)) = touchid::load_secure() {
-                if let Ok(new_creds) =
-                    super::oauth::refresh_token(gateway_url, &bio_refresh).await
+                if let Ok(new_creds) = super::oauth::refresh_token(gateway_url, &bio_refresh).await
                 {
                     let _ = new_creds.save();
                     if let Some(t) = new_creds.access_token {

@@ -234,4 +234,3 @@ pub async fn wait_for_backend(local_url: &str, timeout: Duration) -> Result<()> 
 
     anyhow::bail!("Backend did not become healthy within {:?}", timeout)
 }
-
