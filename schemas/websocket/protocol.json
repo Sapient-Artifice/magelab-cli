@@ -22,7 +22,8 @@
         { "$ref": "#/$defs/SetChat" },
         { "$ref": "#/$defs/Control" },
         { "$ref": "#/$defs/Lifecycle" },
-        { "$ref": "#/$defs/CancelSubagent" }
+        { "$ref": "#/$defs/CancelSubagent" },
+        { "$ref": "#/$defs/VaultGetResponse" }
       ]
     },
 
@@ -54,7 +55,8 @@
         { "$ref": "#/$defs/BindResult" },
         { "$ref": "#/$defs/BrokerError" },
         { "$ref": "#/$defs/ErrorMessage" },
-        { "$ref": "#/$defs/Ping" }
+        { "$ref": "#/$defs/Ping" },
+        { "$ref": "#/$defs/VaultGetPrompt" }
       ]
     },
 
@@ -518,6 +520,32 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "ping" }
+      },
+      "additionalProperties": false
+    },
+
+    "VaultGetPrompt": {
+      "description": "Backend asks the client to retrieve a secret from the Stronghold vault",
+      "type": "object",
+      "required": ["type", "request_id", "key", "reason"],
+      "properties": {
+        "type": { "const": "vault_get_prompt" },
+        "request_id": { "type": "string" },
+        "key": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "VaultGetResponse": {
+      "description": "Client responds with the vault secret. value=null + no error means key not found. error set means vault access failed.",
+      "type": "object",
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "const": "vault_get_response" },
+        "request_id": { "type": "string" },
+        "value": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     }

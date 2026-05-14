@@ -116,8 +116,34 @@ enum Commands {
         #[arg(long)]
         dev: bool,
     },
+    /// Manage secrets in the Stronghold vault
+    Vault {
+        #[command(subcommand)]
+        action: VaultAction,
+    },
     /// Print version
     Version,
+}
+
+#[derive(Subcommand)]
+enum VaultAction {
+    /// List all stored secret names
+    List,
+    /// Retrieve a secret by name
+    Get {
+        /// Secret name
+        name: String,
+    },
+    /// Store a secret (prompts for value interactively)
+    Set {
+        /// Secret name
+        name: String,
+    },
+    /// Delete a secret
+    Delete {
+        /// Secret name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -221,6 +247,17 @@ async fn main() -> Result<()> {
                 }
             }
             cmd_keys(&config, action).await
+        }
+        Commands::Vault { action } => {
+            match &action {
+                VaultAction::Set { .. } | VaultAction::Delete { .. } => {
+                    auth::touchid::verify(auth::touchid::Tier::Sensitive, "manage vault secrets")?;
+                }
+                VaultAction::List | VaultAction::Get { .. } => {
+                    auth::touchid::verify(auth::touchid::Tier::Cached, "access vault")?;
+                }
+            }
+            cmd_vault(action)
         }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
@@ -498,6 +535,58 @@ fn cmd_config(config: &mut Config, action: Option<ConfigAction>) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn cmd_vault(action: VaultAction) -> Result<()> {
+    let vault_config = magelab_core::vault::VaultConfig::default_paths()
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let vault = magelab_core::vault::Vault::open(vault_config)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    match action {
+        VaultAction::List => {
+            let names = vault.list().map_err(|e| anyhow::anyhow!("{}", e))?;
+            if names.is_empty() {
+                println!("No secrets stored.");
+            } else {
+                for name in &names {
+                    println!("  {}", name);
+                }
+            }
+        }
+        VaultAction::Get { name } => {
+            match vault.get(&name).map_err(|e| anyhow::anyhow!("{}", e))? {
+                Some(value) => println!("{}", value),
+                None => {
+                    eprintln!("Secret '{}' not found.", name);
+                    std::process::exit(1);
+                }
+            }
+        }
+        VaultAction::Set { name } => {
+            let value = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                ui::animated_prompt(&format!("Value for '{name}':"))
+            } else {
+                let mut buf = String::new();
+                std::io::stdin().read_line(&mut buf)?;
+                buf.trim().to_string()
+            };
+            if value.is_empty() {
+                anyhow::bail!("Value cannot be empty");
+            }
+            vault
+                .set(&name, &value)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            ui::success(&format!("Stored '{name}'"));
+        }
+        VaultAction::Delete { name } => {
+            vault
+                .delete(&name)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            ui::success(&format!("Deleted '{name}'"));
+        }
+    }
+    Ok(())
 }
 
 /// Show or change backend runtime settings via WebSocket
