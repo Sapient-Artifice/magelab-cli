@@ -3,37 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConnectionMode {
-    Local,
-    Remote,
-    Auto,
-}
-
-#[allow(dead_code)]
-impl ConnectionMode {
-    pub fn from_flags(local: bool, remote: bool) -> Self {
-        match (local, remote) {
-            (true, _) => Self::Local,
-            (_, true) => Self::Remote,
-            _ => Self::Auto,
-        }
-    }
-}
-
-/// The resolved connection after auto-detection
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub enum ResolvedConnection {
-    /// Direct WebSocket to local backend (full tools)
-    Local,
-    /// REST/SSE to gateway API (chat only, API key auth)
-    RemoteRest,
-    /// WebSocket relay through gateway (full tools, JWT auth)
-    RemoteRelay { jwt: String },
-}
-
 /// Discover online devices for the authenticated user
 pub async fn discover_devices(gateway_url: &str, jwt: &str) -> Result<Vec<String>> {
     let client = reqwest::Client::new();
@@ -212,7 +181,6 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
 }
 
 /// Extract the port from an http(s) URL, defaulting to 11115.
-#[allow(dead_code)]
 pub fn port_from_url(url: &str) -> u16 {
     url::Url::parse(url)
         .ok()
@@ -257,12 +225,3 @@ pub async fn wait_for_backend(local_url: &str, timeout: Duration) -> Result<()> 
     anyhow::bail!("Backend did not become healthy within {:?}", timeout)
 }
 
-/// Send shutdown command to a backend child process via stdin
-#[allow(dead_code)]
-pub fn shutdown_backend(child: &mut Child) -> Result<()> {
-    use std::io::Write;
-    if let Some(stdin) = child.stdin.as_mut() {
-        writeln!(stdin, "sidecar shutdown")?;
-    }
-    Ok(())
-}

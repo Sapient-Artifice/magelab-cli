@@ -82,11 +82,6 @@ fn web_url() -> String {
         .to_string()
 }
 
-/// Run the login flow using the default method (Google).
-pub async fn login(gateway_url: &str) -> Result<Credentials> {
-    login_with_method(gateway_url, &LoginMethod::default()).await
-}
-
 /// Run the login flow with a specific method.
 pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Result<Credentials> {
     match method {
@@ -179,6 +174,11 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
+
+    let method = request_line.split_whitespace().next().unwrap_or("");
+    if method != "GET" {
+        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
+    }
 
     let path = request_line
         .split_whitespace()
@@ -473,7 +473,7 @@ async fn exchange_token(gateway_url: &str, body: &serde_json::Value) -> Result<C
 }
 
 fn generate_code_verifier() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::OsRng;
     let bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
@@ -484,7 +484,7 @@ fn generate_code_challenge(verifier: &str) -> String {
 }
 
 fn generate_state() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::OsRng;
     let bytes: Vec<u8> = (0..16).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
@@ -514,6 +514,11 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
+
+    let method = request_line.split_whitespace().next().unwrap_or("");
+    if method != "GET" {
+        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
+    }
 
     let path = request_line
         .split_whitespace()
@@ -562,37 +567,3 @@ pub async fn refresh_token(gateway_url: &str, rt: &str) -> Result<Credentials> {
     Ok(creds)
 }
 
-/// Ensure we have a valid JWT — refresh if expired, login if no credentials
-#[allow(dead_code)]
-pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
-    let creds = Credentials::load()?;
-
-    if creds.is_token_valid() {
-        return creds
-            .access_token
-            .ok_or_else(|| anyhow::anyhow!("Token marked valid but access_token is missing"));
-    }
-
-    // Try biometric-protected refresh token first
-    if let Ok(Some(bio_refresh)) = super::touchid::load_secure() {
-        if let Ok(new_creds) = refresh_token(gateway_url, &bio_refresh).await {
-            return new_creds
-                .access_token
-                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
-        }
-    }
-
-    // Fall back to regular refresh token
-    if let Some(ref rt) = creds.refresh_token {
-        if let Ok(new_creds) = refresh_token(gateway_url, rt).await {
-            return new_creds
-                .access_token
-                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
-        }
-    }
-
-    let new_creds = login(gateway_url).await?;
-    new_creds
-        .access_token
-        .ok_or_else(|| anyhow::anyhow!("Login succeeded but no access_token returned"))
-}

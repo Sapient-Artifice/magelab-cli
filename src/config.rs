@@ -19,12 +19,15 @@ pub struct Config {
     #[serde(default = "default_local_url")]
     pub local_url: String,
 
+    /// Connection preference: "auto", "local", or "remote" (read by Pi extension)
     #[serde(default = "default_prefer")]
     pub prefer: String,
 
+    /// Tools that skip user confirmation (read by backend/Pi extension)
     #[serde(default = "default_auto_approve")]
     pub auto_approve: Vec<String>,
 
+    /// UI theme: "auto", "dark", or "light" (read by backend/Pi extension)
     #[serde(default = "default_theme")]
     pub theme: String,
 

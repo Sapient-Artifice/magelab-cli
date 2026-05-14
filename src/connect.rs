@@ -47,7 +47,8 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     // 2. Try to launch local backend (unless --no-launch)
     if !no_launch {
         if let Some(home) = detect::find_magelab_home(config.magelab_home.as_deref()) {
-            if let Ok(child) = detect::launch_backend_headless(&home, 11115) {
+            let port = detect::port_from_url(&config.local_url);
+            if let Ok(child) = detect::launch_backend_headless(&home, port) {
                 // Detach the child so it outlives this CLI invocation
                 // without leaving a zombie (Unix) or being killed (Windows).
                 std::mem::forget(child);

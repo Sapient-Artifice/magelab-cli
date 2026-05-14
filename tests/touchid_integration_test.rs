@@ -2,17 +2,17 @@ use assert_cmd::Command;
 
 #[test]
 fn no_touchid_flag_accepted_by_version() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "version"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("magelab"));
+        .stdout(predicates::str::contains("mage"));
 }
 
 #[test]
 fn no_touchid_flag_accepted_by_status() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "status"])
         .assert()
@@ -21,7 +21,7 @@ fn no_touchid_flag_accepted_by_status() {
 
 #[test]
 fn no_touchid_flag_accepted_by_config() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "config"])
         .assert()
@@ -30,7 +30,7 @@ fn no_touchid_flag_accepted_by_config() {
 
 #[test]
 fn no_touchid_flag_accepted_by_login_status() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "login", "--status"])
         .assert()
@@ -39,7 +39,7 @@ fn no_touchid_flag_accepted_by_login_status() {
 
 #[test]
 fn no_touchid_flag_accepted_by_completions() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "completions", "bash"])
         .assert()
@@ -48,7 +48,7 @@ fn no_touchid_flag_accepted_by_completions() {
 
 #[test]
 fn no_touchid_flag_is_global() {
-    Command::cargo_bin("magelab")
+    Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "version"])
         .assert()

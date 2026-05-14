@@ -71,10 +71,21 @@ pub fn animated_prompt(label: &str) -> String {
         "\x1b[38;5;57m▌\x1b[0m",
     ];
 
+    // RAII guard to ensure raw mode is always disabled, even on panic
+    struct RawModeGuard;
+    impl Drop for RawModeGuard {
+        fn drop(&mut self) {
+            terminal::disable_raw_mode().ok();
+            print!("\x1b[?25h"); // ensure cursor restored
+            io::stdout().flush().ok();
+        }
+    }
+
     // Print label, hide terminal cursor, enter raw mode
     print!("\x1b[?25l{} ", label);
     io::stdout().flush().ok();
     terminal::enable_raw_mode().ok();
+    let _raw_guard = RawModeGuard;
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
@@ -140,14 +151,12 @@ pub fn animated_prompt(label: &str) -> String {
         }
     }
 
-    // Ensure cleanup
-    if !stop.load(Ordering::Relaxed) {
-        stop.store(true, Ordering::Relaxed);
+    // Ensure animation thread is stopped and joined
+    stop.store(true, Ordering::Relaxed);
+    if let Some(h) = handle.take() {
+        h.join().ok();
     }
-
-    terminal::disable_raw_mode().ok();
-    print!("\x1b[?25h"); // ensure cursor restored
-    io::stdout().flush().ok();
+    // RawModeGuard drop handles disable_raw_mode + cursor restore
 
     input.trim().to_string()
 }

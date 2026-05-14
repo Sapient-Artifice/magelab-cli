@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## What This Is
 
-Rust CLI for MageLab — infrastructure management tool. Binary name: `magelab`. Handles auth, backend detection/launch, account management, config, and device management. NOT a coding agent — the agent experience is provided by the Pi coding agent with the `@magelab/agent` extension.
+Rust CLI for MageLab — infrastructure management tool. Binary name: `mage`. Handles auth, backend detection/launch, account management, config, settings, and device management. NOT a coding agent — the agent experience is provided by the Pi coding agent with the `@magelab/agent` extension.
 
 ## Build & Development Commands
 
@@ -31,16 +31,21 @@ Lean infrastructure CLI. No REPL, no rendering, no streaming.
 ### Commands
 
 ```
-magelab login/logout           # WorkOS OAuth or magic auth
-magelab auth token             # Print JWT to stdout (for Pi extension)
-magelab connect [--json]       # Resolve backend connection
-magelab launch [--wait]        # Start headless backend
-magelab status                 # Health check
-magelab devices                # List/bind/detach relay devices
-magelab models/usage/balance   # Account info
-magelab keys list/create/revoke
-magelab config [set <k> <v>]
-magelab version
+mage login/logout              # WorkOS OAuth or magic auth
+mage auth token                # Print JWT to stdout (for Pi extension)
+mage connect [--json]          # Resolve backend connection
+mage launch [--wait]           # Start headless backend
+mage status                    # Health check
+mage settings                  # Show backend runtime settings (via WebSocket)
+mage settings set model <val>  # Change backend model
+mage settings set voice <val>  # Change backend voice
+mage devices                   # List/bind/detach relay devices
+mage models/usage/balance      # Account info
+mage keys list/create/revoke
+mage config [set <k> <v>]      # CLI config (~/.config/magelab/cli.toml)
+mage completions <shell>       # Generate shell completions
+mage setup-pi [--dev]          # Install @magelab/agent Pi extension
+mage version
 ```
 
 ### Module Layout
@@ -49,12 +54,14 @@ magelab version
 |--------|---------|
 | `src/main.rs` | CLI args (clap), subcommand dispatch |
 | `src/connect.rs` | Connection resolution: local → launch → relay → remote → none |
-| `src/auth/` | `oauth.rs` (WorkOS PKCE + magic auth), `credentials.rs` (keychain + file storage) |
-| `src/client/` | `remote.rs` (REST client for Gateway API), `messages.rs` (WebSocket protocol types) |
+| `src/auth/` | `oauth.rs` (WorkOS PKCE + magic auth + web login), `credentials.rs` (keychain + file storage) |
+| `src/auth/touchid/` | macOS biometric authentication for sensitive operations |
+| `src/client/` | `remote.rs` (REST client for Gateway API) |
 | `src/detect.rs` | Backend discovery, health check, headless launch, device discovery |
 | `src/config.rs` | Config loading/saving from `~/.config/magelab/cli.toml` |
+| `src/settings.rs` | Runtime settings parsed from backend WebSocket responses |
 | `src/account.rs` | Models, usage, balance, API key management |
-| `src/settings.rs` | Runtime config parsing from backend responses |
+| `src/ui.rs` | Spinner, animated prompt, terminal UI helpers |
 
 ## Config
 

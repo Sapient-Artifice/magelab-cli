@@ -151,7 +151,7 @@ pub fn load_biometric_item() -> Result<Option<String>> {
             }
             s if s == errSecItemNotFound => Ok(None),
             s if s == errSecAuthFailed => {
-                eprintln!("Touch ID enrollment changed. Please log in again: magelab login");
+                eprintln!("Touch ID enrollment changed. Please log in again: mage login");
                 Ok(None)
             }
             _ => {

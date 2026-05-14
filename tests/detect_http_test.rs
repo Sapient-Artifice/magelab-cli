@@ -154,11 +154,8 @@ async fn test_get_ws_ticket_missing_field() {
 #[test]
 fn test_find_magelab_home_config_override() {
     let result = detect::find_magelab_home(Some("/custom/magelab/path"));
-    // Config override is checked last; with no env var and no matching paths,
-    // the config override should be returned
-    // Note: This depends on MAGELAB_HOME not being set and no sibling/platform paths existing
-    // In practice, it may return a different path. Let's just verify non-empty override works.
-    assert!(result.is_some() || std::env::var("MAGELAB_HOME").is_ok());
+    // Config override should be returned when provided
+    assert!(result.is_some(), "find_magelab_home should return Some when given a config override");
 }
 
 #[test]

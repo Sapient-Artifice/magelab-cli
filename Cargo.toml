@@ -2,7 +2,7 @@
 name = "magelab-cli"
 version = "0.1.0"
 edition = "2021"
-description = "MageLab CLI — LLM chat and agentic tool use from the terminal"
+description = "MageLab CLI — infrastructure management for MageLab backends and accounts"
 license = "MIT"
 repository = "https://github.com/Sapient-Artifice/magelab-cli"
 readme = "README.md"

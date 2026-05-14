@@ -235,7 +235,7 @@ async fn main() -> Result<()> {
         }
         Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
         Commands::Version => {
-            println!("magelab {}", env!("CARGO_PKG_VERSION"));
+            println!("mage {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
     }
@@ -286,14 +286,14 @@ async fn cmd_auth_token(config: &Config) -> Result<()> {
                 return Ok(());
             }
         }
-        anyhow::bail!("Token expired and refresh failed. Run: magelab login");
+        anyhow::bail!("Token expired and refresh failed. Run: mage login");
     }
     match &creds.access_token {
         Some(token) => {
             print!("{}", token);
             Ok(())
         }
-        None => anyhow::bail!("Not logged in. Run: magelab login"),
+        None => anyhow::bail!("Not logged in. Run: mage login"),
     }
 }
 
@@ -356,7 +356,7 @@ async fn cmd_connect(
             ),
             "relay" => println!("Connected: relay via gateway"),
             "remote" => println!("Connected: gateway REST (chat only)"),
-            "none" => println!("No connection available. Run: magelab login"),
+            "none" => println!("No connection available. Run: mage login"),
             _ => println!("Mode: {}", result.mode),
         }
         if let Some(model) = &result.model {
@@ -372,7 +372,8 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         anyhow::anyhow!("MageLab installation not found. Set magelab_home in config.")
     })?;
 
-    let child = detect::launch_backend_headless(&home, 11115)?;
+    let port = detect::port_from_url(&config.local_url);
+    let child = detect::launch_backend_headless(&home, port)?;
     // Detach the child so it outlives this CLI invocation
     std::mem::forget(child);
 
@@ -383,7 +384,7 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         ui::success(&format!("Backend ready at {}", config.local_url));
     } else {
         ui::success("Backend launched");
-        ui::label("check", "magelab status");
+        ui::label("check", "mage status");
     }
 
     Ok(())
@@ -420,7 +421,7 @@ async fn cmd_devices(config: &Config, action: Option<DevicesAction>, json: bool)
     let jwt = creds
         .access_token
         .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run: magelab login"))?;
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Run: mage login"))?;
 
     match action {
         None => {
@@ -633,7 +634,7 @@ async fn get_token(config: &Config) -> Result<String> {
     }
     config
         .api_key()
-        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: magelab login"))
+        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: mage login"))
 }
 
 // -- Extension files embedded at compile time --
@@ -700,7 +701,7 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
             println!("Neither pnpm nor npm found. Install Node.js first:");
             println!("  https://nodejs.org/");
             println!();
-            println!("Then run: magelab setup-pi");
+            println!("Then run: mage setup-pi");
             return Ok(());
         }
 
@@ -717,7 +718,7 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
             println!("Install Pi manually:");
             println!("  {pkg_mgr} install -g @mariozechner/pi-coding-agent");
             println!();
-            println!("Then run: magelab setup-pi");
+            println!("Then run: mage setup-pi");
             return Ok(());
         }
 
@@ -832,8 +833,11 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     }
 
     // Check if backend is running (quick TCP probe)
+    let config = Config::load().unwrap_or_default();
+    let port = detect::port_from_url(&config.local_url);
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
     let backend_running = std::net::TcpStream::connect_timeout(
-        &"127.0.0.1:11115".parse().unwrap(),
+        &addr,
         std::time::Duration::from_millis(500),
     )
     .is_ok();
@@ -843,11 +847,11 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     println!("  ----------");
     if !backend_running {
         println!("  1. Start MageLab backend:");
-        println!("     magelab launch --wait");
+        println!("     mage launch --wait");
         println!("  2. Start Pi (MageLab tools auto-register):");
         println!("     pi");
     } else {
-        ui::label("backend", "running at 127.0.0.1:11115");
+        ui::label("backend", &format!("running at 127.0.0.1:{}", port));
         println!("  1. Start Pi (MageLab tools auto-register):");
         println!("     pi");
     }
