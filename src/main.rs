@@ -180,6 +180,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
+    // Warn if plaintext API key exists in cli.toml (deprecated)
+    if config.api_key.is_some() {
+        eprintln!(
+            "Warning: Plaintext API key in cli.toml is deprecated.\n\
+             Set it in the desktop app or use MAGELAB_API_KEY env var instead."
+        );
+    }
+
     // Set Touch ID disable flag before any command dispatch
     auth::touchid::set_disabled(cli.no_touchid);
 
@@ -276,23 +284,31 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
         let valid = creds.is_token_valid();
         println!("Token: {}", if valid { "valid" } else { "expired" });
     }
+    // Show vault status
+    match vault::Vault::open() {
+        Ok(v) => {
+            if let Ok(keys) = v.list() {
+                if !keys.is_empty() {
+                    println!("Vault: {} key(s)", keys.len());
+                }
+            }
+        }
+        Err(_) => {} // No vault — normal, don't print anything
+    }
     if let Some(key) = config.api_key() {
         let preview = if key.len() > 8 {
             format!("{}...{}", &key[..4], &key[key.len() - 4..])
         } else {
             "****".to_string()
         };
-        println!("API key: {}", preview);
+        println!("API key (env): {}", preview);
     }
     Ok(())
 }
 
-fn cmd_logout(config: &Config) -> Result<()> {
+fn cmd_logout(_config: &Config) -> Result<()> {
     auth::credentials::Credentials::clear()?;
     println!("Logged out.");
-    if config.api_key().is_some() {
-        println!("Note: API key in config is still active. Use 'mage keys revoke' to deactivate it.");
-    }
     Ok(())
 }
 
@@ -353,10 +369,10 @@ async fn cmd_connect(
             };
         }
         if remote && r.mode != "remote" {
-            if let Some(api_key) = config.api_key() {
+            if let Ok(token) = get_token(config).await {
                 r = connect::ConnectResult {
                     url: Some(config.gateway_url.clone()),
-                    token: Some(api_key),
+                    token: Some(token),
                     mode: "remote".to_string(),
                     model: Some(config.default_model.clone()),
                 };
@@ -430,8 +446,18 @@ async fn cmd_status(config: &Config) -> Result<()> {
         }
     );
 
+    match vault::Vault::open() {
+        Ok(v) => {
+            if let Ok(keys) = v.list() {
+                if !keys.is_empty() {
+                    println!("Vault: {} key(s)", keys.len());
+                }
+            }
+        }
+        Err(_) => println!("Vault: not available"),
+    }
     if let Some(key) = config.api_key() {
-        println!("API key: configured ({}...)", &key[..4.min(key.len())]);
+        println!("API key (env): configured ({}...)", &key[..4.min(key.len())]);
     }
 
     Ok(())
@@ -687,7 +713,9 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
     Ok(())
 }
 
-/// Get the best available token (JWT preferred, API key fallback)
+/// Get the best available token.
+///
+/// Fallback chain: JWT → refresh → biometric refresh → vault → MAGELAB_API_KEY env var → error
 async fn get_token(config: &Config) -> Result<String> {
     let creds = auth::credentials::Credentials::load().unwrap_or_default();
     if let Some(token) = creds.try_get_valid_jwt(&config.gateway_url).await {
@@ -696,9 +724,28 @@ async fn get_token(config: &Config) -> Result<String> {
     if creds.access_token.is_some() {
         eprintln!("Warning: JWT expired and refresh failed. Falling back to API key.");
     }
-    config
-        .api_key()
-        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run: mage login"))
+
+    // Try vault
+    match vault::Vault::open() {
+        Ok(v) => {
+            if let Ok(Some(key)) = v.get("magelab_api_key") {
+                return Ok(key);
+            }
+        }
+        Err(e) => {
+            // Vault errors are debug-level — many users won't have the desktop installed
+            eprintln!("debug: vault unavailable: {e}");
+        }
+    }
+
+    // Env var fallback
+    if let Ok(key) = std::env::var("MAGELAB_API_KEY") {
+        if !key.is_empty() {
+            return Ok(key);
+        }
+    }
+
+    anyhow::bail!("Not authenticated. Run: mage login")
 }
 
 // -- Extension files embedded at compile time --
