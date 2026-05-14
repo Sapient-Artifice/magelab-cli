@@ -6,6 +6,7 @@ mod connect;
 mod detect;
 mod settings;
 mod ui;
+mod vault;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
