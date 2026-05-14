@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 /// Parsed runtime settings from the local backend's get_runtime_config response.
 /// These mirror the desktop app's settings so the CLI stays in sync.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RuntimeSettings {
     pub model: String,
@@ -37,7 +36,6 @@ impl Default for RuntimeSettings {
     }
 }
 
-#[allow(dead_code)]
 impl RuntimeSettings {
     /// Parse a runtime_config WebSocket response into structured settings
     pub fn from_config_map(map: &HashMap<String, Value>) -> Self {
@@ -88,10 +86,4 @@ impl RuntimeSettings {
         settings
     }
 
-    /// Build a config update payload for pushing changes back to the backend
-    pub fn build_update(&self, field: &str, value: Value) -> HashMap<String, Value> {
-        let mut update = HashMap::new();
-        update.insert(field.to_string(), value);
-        update
-    }
 }

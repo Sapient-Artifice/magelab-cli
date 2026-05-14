@@ -56,15 +56,22 @@ pub async fn get_ws_ticket(gateway_url: &str, jwt: &str) -> Result<String> {
         .context("No ws_ticket in response")
 }
 
+/// Shared HTTP client for health checks (avoids creating a new connection pool per call)
+fn health_client() -> &'static reqwest::Client {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 /// Check if the local backend is running by hitting /health
 pub async fn check_backend_health(local_url: &str) -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(200))
-        .build()
-        .unwrap_or_default();
-
     let url = format!("{}/health", local_url.trim_end_matches('/'));
-    client
+    health_client()
         .get(&url)
         .send()
         .await
@@ -152,11 +159,11 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
         .join("magelab");
     std::fs::create_dir_all(&log_dir).ok();
     let log_path = log_dir.join("backend.log");
-    let log_file = std::fs::File::create(&log_path)
-        .unwrap_or_else(|_| std::fs::File::create("/dev/null").unwrap());
-    let log_file_err = log_file
-        .try_clone()
-        .unwrap_or_else(|_| std::fs::File::create("/dev/null").unwrap());
+    let (stdout_cfg, stderr_cfg): (Stdio, Stdio) =
+        match std::fs::File::create(&log_path).and_then(|f| f.try_clone().map(|f2| (f, f2))) {
+            Ok((f, f2)) => (Stdio::from(f), Stdio::from(f2)),
+            Err(_) => (Stdio::null(), Stdio::null()),
+        };
 
     let child = Command::new(&python)
         .args([
@@ -172,8 +179,8 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
         ])
         .current_dir(&backend_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::from(log_file))
-        .stderr(Stdio::from(log_file_err))
+        .stdout(stdout_cfg)
+        .stderr(stderr_cfg)
         .spawn()
         .with_context(|| format!("Failed to launch backend from {}", backend_dir.display()))?;
 

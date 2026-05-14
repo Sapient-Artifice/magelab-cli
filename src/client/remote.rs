@@ -17,6 +17,7 @@ impl RemoteClient {
         }
     }
 
+    /// Used by integration tests.
     #[allow(dead_code)]
     pub fn gateway_url(&self) -> &str {
         &self.gateway_url

@@ -31,7 +31,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Authenticate with MageLab
+    /// Authenticate with MageLab (JWT expires after 1 hour; API key from config is used as fallback)
     Login {
         /// Login method: web (default), google (legacy), magic (legacy)
         #[arg(long, default_value = "web")]
@@ -56,13 +56,13 @@ enum Commands {
         #[arg(long)]
         no_launch: bool,
         /// Force local mode only
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["relay", "remote"])]
         local: bool,
         /// Force relay mode only
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["local", "remote"])]
         relay: bool,
         /// Force remote REST mode only
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["local", "relay"])]
         remote: bool,
     },
     /// Start the headless backend
@@ -122,7 +122,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthAction {
-    /// Print a fresh JWT to stdout (refreshes if expired)
+    /// Print auth token to stdout. Uses JWT if valid, attempts refresh if expired, falls back to API key from config.
     Token,
 }
 
@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
         }
         Commands::Logout => {
             auth::touchid::verify(auth::touchid::Tier::Sensitive, "log out")?;
-            cmd_logout()
+            cmd_logout(&config)
         }
         Commands::Auth { action } => match action {
             AuthAction::Token => {
@@ -269,9 +269,12 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn cmd_logout() -> Result<()> {
+fn cmd_logout(config: &Config) -> Result<()> {
     auth::credentials::Credentials::clear()?;
     println!("Logged out.");
+    if config.api_key().is_some() {
+        println!("Note: API key in config is still active. Use 'mage keys revoke' to deactivate it.");
+    }
     Ok(())
 }
 
@@ -516,51 +519,41 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
         anyhow::anyhow!("Backend not running. Start it with `mage launch`")
     })?;
 
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut got_response = false;
+
     match action {
         None => {
-            // Get runtime config
             let msg = serde_json::json!({"type": "get_runtime_config"});
             ws.send(tokio_tungstenite::tungstenite::Message::Text(
                 msg.to_string(),
             ))
             .await?;
 
-            // Read responses until we get runtime_config
-            while let Some(Ok(raw)) = ws.next().await {
+            while let Ok(Some(Ok(raw))) = tokio::time::timeout_at(deadline, ws.next()).await {
                 if let tokio_tungstenite::tungstenite::Message::Text(text) = raw {
-                    let v: serde_json::Value = serde_json::from_str(&text)?;
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
                     if v.get("type").and_then(|t| t.as_str()) == Some("runtime_config") {
-                        println!(
-                            "Model:    {}",
-                            v["llm_model_name"].as_str().unwrap_or("—")
-                        );
-                        println!(
-                            "Provider: {}",
-                            v["llm_provider_name"].as_str().unwrap_or("—")
-                        );
-                        println!(
-                            "Endpoint: {}",
-                            v["llm_endpoint"].as_str().unwrap_or("—")
-                        );
-                        println!(
-                            "Voice:    {}",
-                            v["voice_model"].as_str().unwrap_or("—")
-                        );
-                        println!(
-                            "TTS:      {}",
-                            if v["tts_stream"].as_bool().unwrap_or(false) {
-                                "streaming"
-                            } else {
-                                "buffered"
-                            }
-                        );
-                        println!(
-                            "Mute:     {}",
-                            v["mute"].as_bool().unwrap_or(true)
-                        );
-                        if let Some(chat) = v["chat_id"].as_str() {
+                        let map: std::collections::HashMap<String, serde_json::Value> =
+                            serde_json::from_value(v).unwrap_or_default();
+                        let s = settings::RuntimeSettings::from_config_map(&map);
+                        println!("Model:    {}", s.model);
+                        println!("Provider: {}", s.provider);
+                        println!("Endpoint: {}", s.endpoint);
+                        println!("Mute:     {}", s.mute);
+                        // voice_model isn't in RuntimeSettings yet, get from raw map
+                        if let Some(voice) = map.get("voice_model").and_then(|v| v.as_str()) {
+                            println!("Voice:    {}", voice);
+                        }
+                        if let Some(tts) = map.get("tts_stream").and_then(|v| v.as_bool()) {
+                            println!("TTS:      {}", if tts { "streaming" } else { "buffered" });
+                        }
+                        if let Some(chat) = map.get("chat_id").and_then(|v| v.as_str()) {
                             println!("Chat:     {}", chat);
                         }
+                        got_response = true;
                         break;
                     }
                 }
@@ -570,10 +563,7 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
             let msg = match key.as_str() {
                 "model" => serde_json::json!({"type": "set_model", "model": value}),
                 "voice" => serde_json::json!({"type": "set_voice", "voice": value}),
-                _ => anyhow::bail!(
-                    "Unknown setting '{}'. Available: model, voice",
-                    key
-                ),
+                _ => unreachable!(),
             };
             let expect_type = format!("set_{}_result", key);
 
@@ -582,15 +572,18 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
             ))
             .await?;
 
-            while let Some(Ok(raw)) = ws.next().await {
+            while let Ok(Some(Ok(raw))) = tokio::time::timeout_at(deadline, ws.next()).await {
                 if let tokio_tungstenite::tungstenite::Message::Text(text) = raw {
-                    let v: serde_json::Value = serde_json::from_str(&text)?;
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
                     if v.get("type").and_then(|t| t.as_str()) == Some(&expect_type) {
                         if v["ok"].as_bool() == Some(true) {
                             ui::success(&format!("{} → {}", key, value));
                         } else {
                             anyhow::bail!("Backend rejected update");
                         }
+                        got_response = true;
                         break;
                     }
                 }
@@ -599,6 +592,9 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
     }
 
     ws.close(None).await.ok();
+    if !got_response {
+        anyhow::bail!("Backend did not respond within 10 seconds");
+    }
     Ok(())
 }
 
@@ -631,6 +627,9 @@ async fn get_token(config: &Config) -> Result<String> {
                 }
             }
         }
+
+        // JWT expired and refresh failed — warn before falling back to API key
+        eprintln!("Warning: JWT expired and refresh failed. Falling back to API key.");
     }
     config
         .api_key()

@@ -552,7 +552,6 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
 }
 
 /// Refresh an expired access token via the gateway
-#[allow(dead_code)]
 pub async fn refresh_token(gateway_url: &str, rt: &str) -> Result<Credentials> {
     let creds = exchange_token(
         gateway_url,

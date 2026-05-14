@@ -7,7 +7,6 @@ use super::touchid;
 const KEYCHAIN_SERVICE: &str = "magelab-cli";
 const KEYCHAIN_ACCOUNT: &str = "default";
 
-#[allow(dead_code)]
 /// Stored authentication credentials
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Credentials {
@@ -23,7 +22,6 @@ pub struct Credentials {
     pub email: Option<String>,
 }
 
-#[allow(dead_code)]
 impl Credentials {
     /// Path to credentials file: ~/.config/magelab/credentials.json
     pub fn path() -> Result<PathBuf> {
@@ -109,7 +107,8 @@ impl Credentials {
         Ok(())
     }
 
-    /// Check if we have a JWT (may be expired)
+    /// Check if we have a JWT (may be expired). Used by integration tests.
+    #[allow(dead_code)]
     pub fn has_token(&self) -> bool {
         self.access_token.is_some()
     }
