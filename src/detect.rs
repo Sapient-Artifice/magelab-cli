@@ -150,7 +150,13 @@ fn platform_default_paths() -> Vec<PathBuf> {
 
 /// Launch the Python backend in headless mode.
 /// `port` is extracted from the configured local_url so it stays in sync.
-pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> {
+/// If `relay_enabled` is true, sets REALTIME_DESKTOP_BROKER_ENABLED=1 so
+/// the backend registers as a relay device with the gateway.
+pub fn launch_backend_headless(
+    magelab_home: &Path,
+    port: u16,
+    relay_enabled: bool,
+) -> Result<Child> {
     let backend_dir = magelab_home.join("backend");
 
     // Try to find Python in the mage-lab venv first, then system
@@ -168,22 +174,28 @@ pub fn launch_backend_headless(magelab_home: &Path, port: u16) -> Result<Child> 
             Err(_) => (Stdio::null(), Stdio::null()),
         };
 
-    let child = Command::new(&python)
-        .args([
-            "-m",
-            "uvicorn",
-            "main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--log-level",
-            "warning",
-        ])
-        .current_dir(&backend_dir)
-        .stdin(Stdio::null())
-        .stdout(stdout_cfg)
-        .stderr(stderr_cfg)
+    let mut cmd = Command::new(&python);
+    cmd.args([
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+        "--log-level",
+        "warning",
+    ])
+    .current_dir(&backend_dir)
+    .stdin(Stdio::null())
+    .stdout(stdout_cfg)
+    .stderr(stderr_cfg);
+
+    if relay_enabled {
+        cmd.env("REALTIME_DESKTOP_BROKER_ENABLED", "1");
+    }
+
+    let child = cmd
         .spawn()
         .with_context(|| format!("Failed to launch backend from {}", backend_dir.display()))?;
 

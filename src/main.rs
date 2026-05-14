@@ -400,7 +400,7 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
     })?;
 
     let port = detect::port_from_url(&config.local_url);
-    let child = detect::launch_backend_headless(&home, port)?;
+    let child = detect::launch_backend_headless(&home, port, config.relay_enabled)?;
     // Detach the child so it outlives this CLI invocation
     std::mem::forget(child);
 

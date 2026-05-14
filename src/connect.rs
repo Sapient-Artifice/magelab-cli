@@ -48,7 +48,7 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     if !no_launch {
         if let Some(home) = detect::find_magelab_home(config.magelab_home.as_deref()) {
             let port = detect::port_from_url(&config.local_url);
-            if let Ok(child) = detect::launch_backend_headless(&home, port) {
+            if let Ok(child) = detect::launch_backend_headless(&home, port, config.relay_enabled) {
                 // Detach the child so it outlives this CLI invocation
                 // without leaving a zombie (Unix) or being killed (Windows).
                 std::mem::forget(child);

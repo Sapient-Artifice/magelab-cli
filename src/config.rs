@@ -33,6 +33,10 @@ pub struct Config {
 
     #[serde(default)]
     pub default_device: Option<String>,
+
+    /// Enable relay — register headless backend as a device with the gateway
+    #[serde(default)]
+    pub relay_enabled: bool,
 }
 
 fn default_model() -> String {
@@ -70,6 +74,7 @@ impl Default for Config {
             auto_approve: default_auto_approve(),
             theme: default_theme(),
             default_device: None,
+            relay_enabled: false,
         }
     }
 }
@@ -136,6 +141,7 @@ impl Config {
             "prefer" => self.prefer = value.to_string(),
             "theme" => self.theme = value.to_string(),
             "default_device" => self.default_device = Some(value.to_string()),
+            "relay_enabled" => self.relay_enabled = value.parse::<bool>().unwrap_or(false),
             _ => anyhow::bail!("Unknown config key: {}", key),
         }
         Ok(())
