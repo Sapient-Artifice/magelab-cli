@@ -93,6 +93,11 @@ enum Commands {
         #[command(subcommand)]
         action: KeysAction,
     },
+    /// Read secrets from the desktop app's encrypted vault
+    Vault {
+        #[command(subcommand)]
+        action: Option<VaultAction>,
+    },
     /// Show or update CLI configuration (local config file)
     Config {
         #[command(subcommand)]
@@ -159,6 +164,17 @@ enum SettingsAction {
     },
 }
 
+#[derive(Subcommand)]
+enum VaultAction {
+    /// Print a secret value to stdout
+    Get {
+        /// Secret key name (e.g., llm_api_key, magelab_api_key)
+        key: String,
+    },
+    /// Push all vault secrets to the running local backend
+    Push,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -223,6 +239,7 @@ async fn main() -> Result<()> {
             }
             cmd_keys(&config, action).await
         }
+        Commands::Vault { action } => cmd_vault(&config, action).await,
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
@@ -476,6 +493,77 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
         KeysAction::List => account::list_keys(&client).await,
         KeysAction::Create => account::create_key(&client).await,
         KeysAction::Revoke { id } => account::revoke_key(&client, &id).await,
+    }
+}
+
+async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
+    match action {
+        None => {
+            // mage vault — list key names
+            auth::touchid::verify(auth::touchid::Tier::Cached, "list vault keys")?;
+            let vault = vault::Vault::open().map_err(|e| match e {
+                vault::VaultError::NotFound(_) => {
+                    anyhow::anyhow!("No vault found. Open the desktop app to create one.")
+                }
+                vault::VaultError::KeychainUnavailable(_) => anyhow::anyhow!(
+                    "Vault exists but no password in keychain. Open the desktop app first, or set MAGELAB_VAULT_PASSWORD env var."
+                ),
+                other => anyhow::anyhow!("{other}"),
+            })?;
+
+            let keys = vault.list()?;
+            if keys.is_empty() {
+                println!("Vault is empty. Store secrets in the desktop app.");
+            } else {
+                for key in &keys {
+                    println!("{}", key);
+                }
+            }
+            Ok(())
+        }
+        Some(VaultAction::Get { key }) => {
+            auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
+            let vault = vault::Vault::open()?;
+            match vault.get(&key)? {
+                Some(value) => {
+                    print!("{}", value); // No newline — for piping
+                    Ok(())
+                }
+                None => anyhow::bail!("Key '{}' not found in vault", key),
+            }
+        }
+        Some(VaultAction::Push) => {
+            auth::touchid::verify(auth::touchid::Tier::Sensitive, "push vault secrets")?;
+            push_vault_secrets(config).await
+        }
+    }
+}
+
+async fn push_vault_secrets(config: &Config) -> Result<()> {
+    let vault = vault::Vault::open()?;
+    let secrets = vault.all_secrets()?;
+
+    if secrets.is_empty() {
+        println!("No secrets in vault to push.");
+        return Ok(());
+    }
+
+    let url = format!("{}/api/auth/push_secrets", config.local_url);
+    let body = serde_json::json!({ "secrets": secrets });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|_| anyhow::anyhow!("Backend not running. Start it with `mage launch`"))?;
+
+    if resp.status().is_success() {
+        ui::success(&format!("Pushed {} secret(s) to backend", secrets.len()));
+        Ok(())
+    } else {
+        anyhow::bail!("Push failed with status {}", resp.status())
     }
 }
 
