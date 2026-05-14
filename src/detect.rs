@@ -89,7 +89,10 @@ pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
     // 2. Config file override (user explicitly set magelab_home)
     if let Some(override_path) = config_override {
         if !override_path.is_empty() {
-            return Some(PathBuf::from(override_path));
+            let p = PathBuf::from(override_path);
+            if p.join("backend").join("main.py").exists() {
+                return Some(p);
+            }
         }
     }
 

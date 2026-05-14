@@ -38,6 +38,7 @@ fn clear_returns_ok_when_not_available() {
 }
 
 mod session_cache_tests {
+    use serial_test::serial;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::TempDir;
@@ -102,6 +103,7 @@ mod session_cache_tests {
     }
 
     #[test]
+    #[serial]
     fn cache_respects_custom_ttl_env() {
         let dir = TempDir::new().unwrap();
         let cache_path = dir.path().join("touchid-session");

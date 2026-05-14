@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::touchid;
 
-const KEYCHAIN_SERVICE: &str = "magelab-cli";
+const KEYCHAIN_SERVICE: &str = "magelab";
 const KEYCHAIN_ACCOUNT: &str = "default";
 
 /// Stored authentication credentials
@@ -123,5 +123,37 @@ impl Credentials {
             (Some(_), None) => true, // No expiry info, assume valid
             _ => false,
         }
+    }
+
+    /// Try to get a valid JWT, refreshing if needed.
+    /// Attempts biometric refresh first, then regular refresh token.
+    /// Returns None if no valid token can be obtained.
+    pub async fn try_get_valid_jwt(&self, gateway_url: &str) -> Option<String> {
+        if let Some(token) = &self.access_token {
+            if self.is_token_valid() {
+                return Some(token.clone());
+            }
+
+            // Try biometric-protected refresh token first
+            if let Ok(Some(bio_refresh)) = touchid::load_secure() {
+                if let Ok(new_creds) =
+                    super::oauth::refresh_token(gateway_url, &bio_refresh).await
+                {
+                    let _ = new_creds.save();
+                    if let Some(t) = new_creds.access_token {
+                        return Some(t);
+                    }
+                }
+            }
+
+            // Fall back to regular refresh token
+            if let Some(refresh) = &self.refresh_token {
+                if let Ok(new_creds) = super::oauth::refresh_token(gateway_url, refresh).await {
+                    let _ = new_creds.save();
+                    return new_creds.access_token;
+                }
+            }
+        }
+        None
     }
 }

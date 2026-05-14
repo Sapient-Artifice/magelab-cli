@@ -10,7 +10,7 @@ use security_framework_sys::item::*;
 use security_framework_sys::keychain_item::*;
 use std::ptr;
 
-const KEYCHAIN_SERVICE: &str = "magelab-cli";
+const KEYCHAIN_SERVICE: &str = "magelab";
 const KEYCHAIN_ACCOUNT: &str = "refresh-bio";
 
 /// Check if Touch ID hardware is available via LAContext

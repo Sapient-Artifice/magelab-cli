@@ -1,6 +1,8 @@
 use magelab_cli::detect::find_magelab_home;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn test_find_magelab_home_env_var() {
     // MAGELAB_HOME env var should take priority
     std::env::set_var("MAGELAB_HOME", "/tmp/fake-magelab");

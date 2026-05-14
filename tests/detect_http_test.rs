@@ -153,9 +153,23 @@ async fn test_get_ws_ticket_missing_field() {
 
 #[test]
 fn test_find_magelab_home_config_override() {
-    let result = detect::find_magelab_home(Some("/custom/magelab/path"));
-    // Config override should be returned when provided
-    assert!(result.is_some(), "find_magelab_home should return Some when given a config override");
+    // Config override must point to a real mage-lab directory (with backend/main.py)
+    let dir = tempfile::TempDir::new().unwrap();
+    let backend_dir = dir.path().join("backend");
+    std::fs::create_dir_all(&backend_dir).unwrap();
+    std::fs::write(backend_dir.join("main.py"), "").unwrap();
+
+    let result = detect::find_magelab_home(Some(dir.path().to_str().unwrap()));
+    assert_eq!(result, Some(dir.path().to_path_buf()));
+}
+
+#[test]
+fn test_find_magelab_home_config_override_nonexistent_returns_none() {
+    // A config override pointing to a nonexistent path should not be accepted
+    let result = detect::find_magelab_home(Some("/nonexistent/magelab/path"));
+    // May still return Some if MAGELAB_HOME or sibling paths exist, but the
+    // override itself should not be returned for a nonexistent path
+    assert_ne!(result, Some(std::path::PathBuf::from("/nonexistent/magelab/path")));
 }
 
 #[test]

@@ -601,34 +601,10 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
 /// Get the best available token (JWT preferred, API key fallback)
 async fn get_token(config: &Config) -> Result<String> {
     let creds = auth::credentials::Credentials::load().unwrap_or_default();
-    if let Some(token) = &creds.access_token {
-        if creds.is_token_valid() {
-            return Ok(token.clone());
-        }
-
-        // Try biometric-protected refresh token first
-        if let Ok(Some(bio_refresh)) = auth::touchid::load_secure() {
-            if let Ok(new_creds) =
-                auth::oauth::refresh_token(&config.gateway_url, &bio_refresh).await
-            {
-                let _ = new_creds.save();
-                if let Some(t) = new_creds.access_token {
-                    return Ok(t);
-                }
-            }
-        }
-
-        // Fall back to regular refresh token
-        if let Some(refresh) = &creds.refresh_token {
-            if let Ok(new_creds) = auth::oauth::refresh_token(&config.gateway_url, refresh).await {
-                let _ = new_creds.save();
-                if let Some(t) = new_creds.access_token {
-                    return Ok(t);
-                }
-            }
-        }
-
-        // JWT expired and refresh failed — warn before falling back to API key
+    if let Some(token) = creds.try_get_valid_jwt(&config.gateway_url).await {
+        return Ok(token);
+    }
+    if creds.access_token.is_some() {
         eprintln!("Warning: JWT expired and refresh failed. Falling back to API key.");
     }
     config

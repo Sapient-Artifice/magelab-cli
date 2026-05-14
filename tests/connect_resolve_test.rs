@@ -1,5 +1,6 @@
 use magelab_cli::config::Config;
 use magelab_cli::connect;
+use serial_test::serial;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -17,6 +18,7 @@ fn config_with_local(local_url: &str) -> Config {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_local_backend_running() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -36,6 +38,7 @@ async fn test_resolve_local_backend_running() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_falls_to_remote_with_api_key() {
     std::env::remove_var("MAGELAB_API_KEY");
     // No local backend, no JWT, but has API key
@@ -50,6 +53,7 @@ async fn test_resolve_falls_to_remote_with_api_key() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_returns_none_when_nothing_available() {
     std::env::remove_var("MAGELAB_API_KEY");
     // No local backend, no JWT, no API key
@@ -64,6 +68,7 @@ async fn test_resolve_returns_none_when_nothing_available() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_no_launch_skips_backend_launch() {
     std::env::remove_var("MAGELAB_API_KEY");
     // With no_launch=true, should not try to start a backend
@@ -76,6 +81,7 @@ async fn test_resolve_no_launch_skips_backend_launch() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_remote_includes_gateway_url() {
     std::env::remove_var("MAGELAB_API_KEY");
     let mut config = config_with_local("http://127.0.0.1:1");
@@ -92,6 +98,7 @@ async fn test_resolve_remote_includes_gateway_url() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_resolve_local_uses_configured_model() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

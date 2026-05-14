@@ -123,21 +123,5 @@ async fn get_valid_jwt(
     creds: &auth::credentials::Credentials,
     gateway_url: &str,
 ) -> Option<String> {
-    if let Some(token) = &creds.access_token {
-        if !creds.is_token_valid() {
-            // Try refresh
-            if let Some(refresh) = &creds.refresh_token {
-                if let Ok(new_creds) = auth::oauth::refresh_token(gateway_url, refresh).await {
-                    if let Err(e) = new_creds.save() {
-                        // Log but don't fail — the in-memory token is still usable
-                        eprintln!("[magelab] Warning: failed to persist refreshed token: {e}");
-                    }
-                    return new_creds.access_token;
-                }
-            }
-            return None;
-        }
-        return Some(token.clone());
-    }
-    None
+    creds.try_get_valid_jwt(gateway_url).await
 }

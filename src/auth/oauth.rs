@@ -6,14 +6,42 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::TcpListener;
 use std::str::FromStr;
-use workos::sso::ClientId;
-use workos::user_management::{
-    CodeChallenge, ConnectionSelector, GetAuthorizationUrl, GetAuthorizationUrlParams,
-    OauthProvider, Provider,
-};
-use workos::{ApiKey, WorkOs};
 
 use super::credentials::Credentials;
+
+/// WorkOS authorize endpoint
+const WORKOS_AUTHORIZE_URL: &str = "https://api.workos.com/user_management/authorize";
+
+/// Branded HTML page shown after successful OAuth callback
+const LOGIN_SUCCESS_HTML: &str = concat!(
+    "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+    "<meta name=\"referrer\" content=\"no-referrer\">",
+    "<title>Mage Lab — Login Successful</title>",
+    "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
+    "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
+    "<link href=\"https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap\" rel=\"stylesheet\">",
+    "<style>",
+    "*{margin:0;padding:0;box-sizing:border-box}",
+    "body{background:#09090b;color:#fafafa;font-family:'Geist',system-ui,sans-serif;",
+    "min-height:100vh;display:flex;align-items:center;justify-content:center}",
+    ".card{text-align:center;max-width:400px;padding:3rem 2rem}",
+    ".icon{width:48px;height:48px;margin:0 auto 1.5rem;border-radius:12px;",
+    "background:linear-gradient(135deg,#8b5cf6,#7c3aed);",
+    "display:flex;align-items:center;justify-content:center}",
+    ".icon svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}",
+    "h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-.01em}",
+    "p{color:#a1a1aa;font-size:.875rem;line-height:1.5}",
+    ".hint{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.06);",
+    "color:#71717a;font-size:.75rem;font-family:'Geist Mono',monospace}",
+    "</style></head><body>",
+    "<div class=\"card\">",
+    "<div class=\"icon\"><svg viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"/></svg></div>",
+    "<h1>Login successful</h1>",
+    "<p>You can close this tab and return to the terminal.</p>",
+    "<div class=\"hint\">mage cli</div>",
+    "</div></body></html>",
+);
 
 /// Prompt for user input from stdin
 fn prompt(label: &str) -> String {
@@ -194,39 +222,10 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         .map(|(_, v)| v.to_string())
         .context("No code in callback — login may have failed")?;
 
-    let body = concat!(
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
-        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
-        "<meta name=\"referrer\" content=\"no-referrer\">",
-        "<title>Mage Lab — Login Successful</title>",
-        "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
-        "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
-        "<link href=\"https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap\" rel=\"stylesheet\">",
-        "<style>",
-        "*{margin:0;padding:0;box-sizing:border-box}",
-        "body{background:#09090b;color:#fafafa;font-family:'Geist',system-ui,sans-serif;",
-        "min-height:100vh;display:flex;align-items:center;justify-content:center}",
-        ".card{text-align:center;max-width:400px;padding:3rem 2rem}",
-        ".icon{width:48px;height:48px;margin:0 auto 1.5rem;border-radius:12px;",
-        "background:linear-gradient(135deg,#8b5cf6,#7c3aed);",
-        "display:flex;align-items:center;justify-content:center}",
-        ".icon svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}",
-        "h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-.01em}",
-        "p{color:#a1a1aa;font-size:.875rem;line-height:1.5}",
-        ".hint{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.06);",
-        "color:#71717a;font-size:.75rem;font-family:'Geist Mono',monospace}",
-        "</style></head><body>",
-        "<div class=\"card\">",
-        "<div class=\"icon\"><svg viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"/></svg></div>",
-        "<h1>Login successful</h1>",
-        "<p>You can close this tab and return to the terminal.</p>",
-        "<div class=\"hint\">magelab cli</div>",
-        "</div></body></html>",
-    );
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body,
+        LOGIN_SUCCESS_HTML.len(),
+        LOGIN_SUCCESS_HTML,
     );
     stream.write_all(response.as_bytes()).ok();
 
@@ -364,12 +363,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
 
 /// Google OAuth login flow — builds auth URL locally, exchanges code through gateway
 async fn login_google(gateway_url: &str) -> Result<Credentials> {
-    // Build auth URL using WorkOS SDK (client-side, no API key needed)
-    let key: ApiKey = "sk_placeholder".to_string().into();
-    let workos = WorkOs::new(&key);
     let cid_str = client_id();
-    let cid: ClientId = cid_str.clone().into();
-
     let verifier = generate_code_verifier();
     let challenge = generate_code_challenge(&verifier);
     let state = generate_state();
@@ -378,24 +372,17 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
         .context("Failed to start loopback server on port 19872 — is another instance running?")?;
     let redirect_uri = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
 
-    let provider = Provider::Oauth(OauthProvider::GoogleOAuth);
-    let params = GetAuthorizationUrlParams {
-        client_id: &cid,
-        redirect_uri: &redirect_uri,
-        connection_selector: ConnectionSelector::Provider(&provider),
-        state: Some(&state),
-        code_challenge: Some(CodeChallenge::S256(&challenge)),
-        login_hint: None,
-        domain_hint: None,
-    };
+    let authorize_url = format!(
+        "{}?client_id={}&redirect_uri={}&provider=GoogleOAuth&response_type=code&state={}&code_challenge={}&code_challenge_method=S256",
+        WORKOS_AUTHORIZE_URL,
+        urlencoding::encode(&cid_str),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(&state),
+        urlencoding::encode(&challenge),
+    );
 
-    let authorize_url = workos
-        .user_management()
-        .get_authorization_url(&params)
-        .context("Failed to build WorkOS authorization URL")?;
-
-    crate::ui::label("open", authorize_url.as_str());
-    open::that(authorize_url.as_str()).ok();
+    crate::ui::label("open", &authorize_url);
+    open::that(&authorize_url).ok();
 
     let sp = crate::ui::spinner("Waiting for authentication...");
     let (code, returned_state) = wait_for_callback(listener)?;
@@ -540,11 +527,10 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
         .map(|(_, v)| v.to_string())
         .unwrap_or_default();
 
-    let body = "<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body,
+        LOGIN_SUCCESS_HTML.len(),
+        LOGIN_SUCCESS_HTML,
     );
     stream.write_all(response.as_bytes()).ok();
 
