@@ -6,8 +6,6 @@ mod connect;
 mod detect;
 mod settings;
 mod ui;
-mod vault;
-
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
@@ -280,7 +278,7 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
         println!("Token: {}", if valid { "valid" } else { "expired" });
     }
     // Show vault status
-    if let Ok(v) = vault::Vault::open() {
+    if let Ok(v) = magelab_core::vault::Vault::open() {
         if let Ok(keys) = v.list() {
             if !keys.is_empty() {
                 println!("Vault: {} key(s)", keys.len());
@@ -413,7 +411,7 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         ui::success(&format!("Backend ready at {}", config.local_url));
 
         // Auto-push vault secrets (same as desktop's initSecrets startup flow)
-        if let Ok(v) = vault::Vault::open() {
+        if let Ok(v) = magelab_core::vault::Vault::open() {
             if let Ok(secrets) = v.all_secrets() {
                 if !secrets.is_empty() {
                     if let Err(e) = push_vault_secrets(config).await {
@@ -449,7 +447,7 @@ async fn cmd_status(config: &Config) -> Result<()> {
         }
     );
 
-    match vault::Vault::open() {
+    match magelab_core::vault::Vault::open() {
         Ok(v) => {
             if let Ok(keys) = v.list() {
                 if !keys.is_empty() {
@@ -554,11 +552,11 @@ async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
         None => {
             // mage vault — list key names
             auth::touchid::verify(auth::touchid::Tier::Cached, "list vault keys")?;
-            let vault = vault::Vault::open().map_err(|e| match e {
-                vault::VaultError::NotFound(_) => {
+            let vault = magelab_core::vault::Vault::open().map_err(|e| match e {
+                magelab_core::vault::VaultError::NotFound(_) => {
                     anyhow::anyhow!("No vault found. Open the desktop app to create one.")
                 }
-                vault::VaultError::KeychainUnavailable(_) => anyhow::anyhow!(
+                magelab_core::vault::VaultError::KeychainUnavailable(_) => anyhow::anyhow!(
                     "Vault exists but no password in keychain. Open the desktop app first, or set MAGELAB_VAULT_PASSWORD env var."
                 ),
                 other => anyhow::anyhow!("{other}"),
@@ -576,7 +574,7 @@ async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
         }
         Some(VaultAction::Get { key }) => {
             auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
-            let vault = vault::Vault::open()?;
+            let vault = magelab_core::vault::Vault::open()?;
             match vault.get(&key)? {
                 Some(value) => {
                     print!("{}", value); // No newline — for piping
@@ -593,7 +591,7 @@ async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
 }
 
 async fn push_vault_secrets(config: &Config) -> Result<()> {
-    let vault = vault::Vault::open()?;
+    let vault = magelab_core::vault::Vault::open()?;
     let secrets = vault.all_secrets()?;
 
     if secrets.is_empty() {
@@ -753,7 +751,7 @@ async fn get_token(config: &Config) -> Result<String> {
     }
 
     // Try vault
-    match vault::Vault::open() {
+    match magelab_core::vault::Vault::open() {
         Ok(v) => {
             if let Ok(Some(key)) = v.get("magelab_api_key") {
                 return Ok(key);
