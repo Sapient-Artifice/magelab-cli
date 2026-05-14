@@ -182,7 +182,7 @@ fn test_login_status_shows_api_key() {
         .env("MAGELAB_API_KEY", "sk-test-1234567890abcdef")
         .assert()
         .success()
-        .stdout(predicate::str::contains("API key: sk-t...cdef"));
+        .stdout(predicate::str::contains("API key (env): sk-t...cdef"));
 }
 
 /// Code exchange: valid code + matching state → credentials returned.
