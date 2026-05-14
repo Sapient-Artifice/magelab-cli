@@ -46,3 +46,20 @@ fn test_save_config() {
     let loaded = magelab_cli::config::Config::load_from(&config_path).unwrap();
     assert_eq!(loaded.api_key, Some("mage_saved".to_string()));
 }
+
+#[test]
+fn test_default_device_none_by_default() {
+    let config = magelab_cli::config::Config::default();
+    assert!(config.default_device.is_none());
+}
+
+#[test]
+fn test_config_with_default_device() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("cli.toml");
+    let mut f = std::fs::File::create(&config_path).unwrap();
+    writeln!(f, r#"default_device = "macbook-pro""#).unwrap();
+
+    let config = magelab_cli::config::Config::load_from(config_path).unwrap();
+    assert_eq!(config.default_device.as_deref(), Some("macbook-pro"));
+}

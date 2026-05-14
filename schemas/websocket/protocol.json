@@ -1,0 +1,525 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://magelab.ai/schemas/websocket/protocol.json",
+  "title": "MageLab WebSocket Protocol",
+  "description": "Message types for communication between clients (CLI, Pi extension) and the MageLab Python backend over WebSocket.",
+
+  "$defs": {
+    "ClientMessage": {
+      "description": "Messages sent from client to backend",
+      "oneOf": [
+        { "$ref": "#/$defs/TextMessage" },
+        { "$ref": "#/$defs/AudioMessage" },
+        { "$ref": "#/$defs/GetRuntimeConfig" },
+        { "$ref": "#/$defs/GetTools" },
+        { "$ref": "#/$defs/ToolCallRequest" },
+        { "$ref": "#/$defs/ConfirmationResponse" },
+        { "$ref": "#/$defs/SetModel" },
+        { "$ref": "#/$defs/SetVoice" },
+        { "$ref": "#/$defs/GetModels" },
+        { "$ref": "#/$defs/NewChat" },
+        { "$ref": "#/$defs/GetChats" },
+        { "$ref": "#/$defs/SetChat" },
+        { "$ref": "#/$defs/Control" },
+        { "$ref": "#/$defs/Lifecycle" },
+        { "$ref": "#/$defs/CancelSubagent" }
+      ]
+    },
+
+    "ServerMessage": {
+      "description": "Messages sent from backend to client",
+      "oneOf": [
+        { "$ref": "#/$defs/AssistantStream" },
+        { "$ref": "#/$defs/Assistant" },
+        { "$ref": "#/$defs/AssistantComplete" },
+        { "$ref": "#/$defs/Transcription" },
+        { "$ref": "#/$defs/ConfirmationRequest" },
+        { "$ref": "#/$defs/ToolResult" },
+        { "$ref": "#/$defs/ToolDebug" },
+        { "$ref": "#/$defs/RuntimeConfig" },
+        { "$ref": "#/$defs/ToolsList" },
+        { "$ref": "#/$defs/ToolCallResult" },
+        { "$ref": "#/$defs/SetModelResult" },
+        { "$ref": "#/$defs/ModelsResult" },
+        { "$ref": "#/$defs/NewChatResult" },
+        { "$ref": "#/$defs/ChatListResult" },
+        { "$ref": "#/$defs/ChatSwitchResult" },
+        { "$ref": "#/$defs/TokenCount" },
+        { "$ref": "#/$defs/SubagentUpdate" },
+        { "$ref": "#/$defs/SubagentComplete" },
+        { "$ref": "#/$defs/Notify" },
+        { "$ref": "#/$defs/OpenUrl" },
+        { "$ref": "#/$defs/OpenFile" },
+        { "$ref": "#/$defs/BrokerStatus" },
+        { "$ref": "#/$defs/BindResult" },
+        { "$ref": "#/$defs/BrokerError" },
+        { "$ref": "#/$defs/ErrorMessage" },
+        { "$ref": "#/$defs/Ping" }
+      ]
+    },
+
+    "TextMessage": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "AudioMessage": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "audio" }
+      },
+      "additionalProperties": true
+    },
+
+    "GetRuntimeConfig": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "get_runtime_config" }
+      },
+      "additionalProperties": false
+    },
+
+    "GetTools": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "get_tools" }
+      },
+      "additionalProperties": false
+    },
+
+    "ToolCallRequest": {
+      "type": "object",
+      "required": ["type", "call_id", "function_name"],
+      "properties": {
+        "type": { "const": "tool_call" },
+        "call_id": { "type": "string", "description": "Client-generated UUID for response correlation" },
+        "function_name": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+
+    "ConfirmationResponse": {
+      "type": "object",
+      "required": ["type", "confirmation_id", "confirmed", "remember"],
+      "properties": {
+        "type": { "const": "confirmation_response" },
+        "confirmation_id": { "type": "string" },
+        "confirmed": { "type": "boolean" },
+        "remember": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "SetModel": {
+      "type": "object",
+      "required": ["type", "model"],
+      "properties": {
+        "type": { "const": "set_model" },
+        "model": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "SetVoice": {
+      "type": "object",
+      "required": ["type", "voice"],
+      "properties": {
+        "type": { "const": "set_voice" },
+        "voice": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "GetModels": {
+      "type": "object",
+      "required": ["type", "endpoint", "api_key"],
+      "properties": {
+        "type": { "const": "get_models" },
+        "endpoint": { "type": "string" },
+        "api_key": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "NewChat": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "new_chat" }
+      },
+      "additionalProperties": false
+    },
+
+    "GetChats": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "get_chats" }
+      },
+      "additionalProperties": false
+    },
+
+    "SetChat": {
+      "type": "object",
+      "required": ["type", "history_path"],
+      "properties": {
+        "type": { "const": "set_chat" },
+        "history_path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Control": {
+      "type": "object",
+      "required": ["type", "action"],
+      "properties": {
+        "type": { "const": "control" },
+        "action": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Lifecycle": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "lifecycle" },
+        "action": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "CancelSubagent": {
+      "type": "object",
+      "required": ["type", "task_id"],
+      "properties": {
+        "type": { "const": "cancel_subagent" },
+        "task_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "AssistantStream": {
+      "type": "object",
+      "required": ["type", "phase"],
+      "properties": {
+        "type": { "const": "assistant_stream" },
+        "phase": { "type": "string", "enum": ["start", "delta", "end"] },
+        "token": { "type": "string" },
+        "text": { "type": "string" },
+        "content": { "type": "string" },
+        "model": { "type": "string" },
+        "stream_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Assistant": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "assistant" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "AssistantComplete": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "assistant_complete" }
+      },
+      "additionalProperties": false
+    },
+
+    "Transcription": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "transcription" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ConfirmationRequest": {
+      "type": "object",
+      "required": ["type", "confirmation_id", "function_name"],
+      "properties": {
+        "type": { "const": "confirmation_request" },
+        "confirmation_id": { "type": "string" },
+        "function_name": { "type": "string" },
+        "script": { "type": "string" },
+        "arguments": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+
+    "ToolResult": {
+      "type": "object",
+      "required": ["type", "function_name"],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "function_name": { "type": "string" },
+        "result": {}
+      },
+      "additionalProperties": false
+    },
+
+    "ToolDebug": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "tool_debug" },
+        "message_type": { "type": "string" },
+        "content": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "RuntimeConfig": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "runtime_config" },
+        "llm_provider_name": { "type": "string" },
+        "llm_endpoint": { "type": "string" },
+        "llm_model_name": { "type": "string" },
+        "voice_model": { "type": "string" },
+        "tts_stream": { "type": "boolean" },
+        "mute": { "type": "boolean" },
+        "history_path": { "type": "string" },
+        "list_files": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+
+    "ToolsList": {
+      "type": "object",
+      "required": ["type", "tools"],
+      "properties": {
+        "type": { "const": "tools_list" },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "const": "function" },
+              "function": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "parameters": { "type": "object" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ToolCallResult": {
+      "type": "object",
+      "required": ["type", "call_id", "success"],
+      "properties": {
+        "type": { "const": "tool_call_result" },
+        "call_id": { "type": "string" },
+        "success": { "type": "boolean" },
+        "result": {},
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "SetModelResult": {
+      "type": "object",
+      "required": ["type", "success"],
+      "properties": {
+        "type": { "const": "set_model_result" },
+        "success": { "type": "boolean" },
+        "model": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ModelsResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "models_result" },
+        "models": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+
+    "NewChatResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "new_chat_result" },
+        "history_path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ChatListResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "chat_list_result" },
+        "ok": { "type": "boolean" },
+        "history_path": { "type": "string" },
+        "chats": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+
+    "ChatSwitchResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "chat_switch_result" },
+        "ok": { "type": "boolean" },
+        "history_path": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "TokenCount": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "token_count" },
+        "sys_count": { "type": "integer" },
+        "win_count": { "type": "integer" },
+        "total_count": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+
+    "SubagentUpdate": {
+      "type": "object",
+      "required": ["type", "task_id", "name"],
+      "properties": {
+        "type": { "const": "subagent_update" },
+        "task_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "progress": { "type": "string" },
+        "output_preview": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "SubagentComplete": {
+      "type": "object",
+      "required": ["type", "task_id", "name"],
+      "properties": {
+        "type": { "const": "subagent_complete" },
+        "task_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "result": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Notify": {
+      "type": "object",
+      "required": ["type", "title", "body"],
+      "properties": {
+        "type": { "const": "notify" },
+        "title": { "type": "string" },
+        "body": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "OpenUrl": {
+      "type": "object",
+      "required": ["type", "url"],
+      "properties": {
+        "type": { "const": "open_url" },
+        "url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+
+    "OpenFile": {
+      "type": "object",
+      "required": ["type", "filepath"],
+      "properties": {
+        "type": { "const": "open_file" },
+        "filepath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "BrokerStatus": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "broker_status" },
+        "devices": { "type": "array", "items": { "type": "string" } },
+        "bound_device_id": { "type": "string" },
+        "connected": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "BindResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "bind_result" },
+        "bound_device_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "BrokerError": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "broker_error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ErrorMessage": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "error" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Ping": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "ping" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

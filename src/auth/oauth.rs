@@ -3,103 +3,518 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::net::TcpListener;
+use std::str::FromStr;
+use workos::sso::ClientId;
+use workos::user_management::{
+    CodeChallenge, ConnectionSelector, GetAuthorizationUrl, GetAuthorizationUrlParams,
+    OauthProvider, Provider,
+};
+use workos::{ApiKey, WorkOs};
 
 use super::credentials::Credentials;
 
-/// Supabase auth base URL
-const AUTH_URL: &str = "https://auth.magelab.ai/auth/v1";
+/// Prompt for user input from stdin
+fn prompt(label: &str) -> String {
+    eprint!("{} ", label);
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap_or_default();
+    input.trim().to_string()
+}
 
-/// Run the full OAuth login flow:
-/// 1. Generate PKCE verifier + challenge
-/// 2. Start loopback HTTP server
-/// 3. Open browser to Supabase OAuth
-/// 4. Handle callback with auth code
-/// 5. Exchange code for tokens
-/// 6. Save credentials
-pub async fn login(_gateway_url: &str) -> Result<Credentials> {
-    // Generate PKCE
+/// WorkOS Client ID (shared with web frontend)
+const DEFAULT_CLIENT_ID: &str = "client_01KKJ9GJKHDMW63A3RCV56KVZ6";
+
+/// Fixed loopback port (must match WorkOS redirect URI config)
+const LOOPBACK_PORT: u16 = 19872;
+
+/// URL for new account signup
+const SIGNUP_URL: &str = "https://magelab.ai/signup";
+
+/// Login method selection
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LoginMethod {
+    /// Google OAuth via browser (legacy — requires gateway WorkOS API key)
+    Google,
+    /// Magic auth code via email (legacy — requires gateway WorkOS API key)
+    MagicAuth,
+    /// Web-based login via the MageLab web app (browser → encrypted code exchange)
+    #[default]
+    Web,
+}
+
+impl FromStr for LoginMethod {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "google" => Ok(Self::Google),
+            "magic" | "email" | "magic-auth" => Ok(Self::MagicAuth),
+            "web" | "browser" => Ok(Self::Web),
+            _ => anyhow::bail!(
+                "Unknown login method '{}'. Use 'google', 'magic', or 'web'.",
+                s
+            ),
+        }
+    }
+}
+
+/// Get WorkOS Client ID from env or default
+fn client_id() -> String {
+    std::env::var("WORKOS_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string())
+}
+
+/// Get auth base URL. Defaults to {gateway_url}/v1/auth.
+/// Override with MAGELAB_AUTH_URL for testing against the web app
+/// (e.g. MAGELAB_AUTH_URL=http://localhost:3007/api/auth)
+fn auth_base_url(gateway_url: &str) -> String {
+    std::env::var("MAGELAB_AUTH_URL")
+        .unwrap_or_else(|_| format!("{}/v1/auth", gateway_url.trim_end_matches('/')))
+}
+
+/// Get the MageLab web app URL for browser-based login.
+/// Defaults to https://magelab.ai. Override with MAGELAB_WEB_URL for local dev.
+fn web_url() -> String {
+    std::env::var("MAGELAB_WEB_URL")
+        .unwrap_or_else(|_| "https://magelab.ai".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Run the login flow using the default method (Google).
+pub async fn login(gateway_url: &str) -> Result<Credentials> {
+    login_with_method(gateway_url, &LoginMethod::default()).await
+}
+
+/// Run the login flow with a specific method.
+pub async fn login_with_method(gateway_url: &str, method: &LoginMethod) -> Result<Credentials> {
+    match method {
+        LoginMethod::Google => login_google(gateway_url).await,
+        LoginMethod::MagicAuth => login_magic_auth(gateway_url).await,
+        LoginMethod::Web => login_web().await,
+    }
+}
+
+/// Web-based login — two-phase code exchange via the MageLab web app.
+///
+/// Security: the access token is AES-256-GCM encrypted in transit. The state
+/// parameter IS visible in the browser address bar/history (it's part of the
+/// returnTo URL), but exploiting this requires BOTH the state AND the encrypted
+/// code (which only appears in the loopback redirect to 127.0.0.1:19872).
+///
+/// Flow:
+///   1. CLI generates a random `state` and binds loopback on :19872
+///   2. Browser opens to {web_url}/auth/sign-in → user authenticates
+///   3. Web app encrypts token with AES-256-GCM (key = server_secret + state),
+///      redirects to loopback with ?code=<encrypted>
+///   4. CLI POSTs {code, state} back — web app re-derives the key and decrypts
+async fn login_web() -> Result<Credentials> {
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
+        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
+
+    let state = generate_state();
+    let loopback_url = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
+    let base = web_url();
+
+    let cli_token_url = format!(
+        "{}/api/auth/cli-token?redirect={}&state={}",
+        base,
+        urlencoding::encode(&loopback_url),
+        urlencoding::encode(&state)
+    );
+    let sign_in_url = format!(
+        "{}/auth/sign-in?returnTo={}",
+        base,
+        urlencoding::encode(&cli_token_url)
+    );
+
+    crate::ui::label("open", &sign_in_url);
+    open::that(&sign_in_url).ok();
+
+    let sp = crate::ui::spinner("Waiting for authentication...");
+    let code = wait_for_code_callback(listener)?;
+    sp.finish_and_clear();
+
+    // State is verified implicitly: the web app encrypts the token using
+    // AES-256-GCM with a key derived from (server_secret + state). If the
+    // state is wrong, decryption fails in the POST exchange below.
+    let sp = crate::ui::spinner("Exchanging code...");
+    let creds = exchange_cli_code(&base, &code, &state).await?;
+    sp.finish_and_clear();
+
+    creds.save()?;
+    if let Some(ref email) = creds.email {
+        crate::ui::success(&format!("Logged in as {email}"));
+    }
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
+    Ok(creds)
+}
+
+/// Wait for the web app to redirect to our loopback with an encrypted code.
+/// Returns the code. State is verified implicitly during decryption in exchange_cli_code.
+/// Times out after 3 minutes.
+fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_secs(180);
+    listener.set_nonblocking(true)?;
+
+    let (mut stream, _) = loop {
+        match listener.accept() {
+            Ok(conn) => break conn,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "Login timed out — no response received within 3 minutes. Try again."
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        }
+    };
+
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line)?;
+
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .context("Invalid HTTP request")?;
+
+    let url = url::Url::parse(&format!("http://localhost{}", path))
+        .context("Failed to parse callback URL")?;
+
+    let code = url
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.to_string())
+        .context("No code in callback — login may have failed")?;
+
+    let body = concat!(
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        "<meta name=\"referrer\" content=\"no-referrer\">",
+        "<title>Mage Lab — Login Successful</title>",
+        "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
+        "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
+        "<link href=\"https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap\" rel=\"stylesheet\">",
+        "<style>",
+        "*{margin:0;padding:0;box-sizing:border-box}",
+        "body{background:#09090b;color:#fafafa;font-family:'Geist',system-ui,sans-serif;",
+        "min-height:100vh;display:flex;align-items:center;justify-content:center}",
+        ".card{text-align:center;max-width:400px;padding:3rem 2rem}",
+        ".icon{width:48px;height:48px;margin:0 auto 1.5rem;border-radius:12px;",
+        "background:linear-gradient(135deg,#8b5cf6,#7c3aed);",
+        "display:flex;align-items:center;justify-content:center}",
+        ".icon svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}",
+        "h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-.01em}",
+        "p{color:#a1a1aa;font-size:.875rem;line-height:1.5}",
+        ".hint{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.06);",
+        "color:#71717a;font-size:.75rem;font-family:'Geist Mono',monospace}",
+        "</style></head><body>",
+        "<div class=\"card\">",
+        "<div class=\"icon\"><svg viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"/></svg></div>",
+        "<h1>Login successful</h1>",
+        "<p>You can close this tab and return to the terminal.</p>",
+        "<div class=\"hint\">magelab cli</div>",
+        "</div></body></html>",
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
+    );
+    stream.write_all(response.as_bytes()).ok();
+
+    Ok(code)
+}
+
+/// Exchange an encrypted CLI code for credentials via POST to the web app.
+pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Result<Credentials> {
+    let http = reqwest::Client::new();
+    let url = format!("{}/api/auth/cli-token", web_base);
+
+    let resp = http
+        .post(&url)
+        .json(&serde_json::json!({ "code": code, "state": state }))
+        .send()
+        .await
+        .context("Failed to exchange code with web app")?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 410 {
+            anyhow::bail!("Login code expired — the 60-second window elapsed. Please try again.");
+        }
+        anyhow::bail!("Code exchange failed ({}): {}", status, body);
+    }
+
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse code exchange response")?;
+
+    let access_token = data["access_token"]
+        .as_str()
+        .context("No access_token in response")?
+        .to_string();
+
+    let email = data["email"].as_str().map(String::from);
+    let user_id = data["user_id"].as_str().map(String::from);
+
+    // Server includes expires_in from JWT exp claim when available
+    let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
+    let expires_at = chrono::Utc::now().timestamp() + expires_in;
+
+    Ok(Credentials {
+        access_token: Some(access_token),
+        refresh_token: None,
+        expires_at: Some(expires_at),
+        user_id,
+        email,
+    })
+}
+
+/// Magic Auth login flow — exchanges code through the gateway
+async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
+    let http = reqwest::Client::new();
+    let cid = client_id();
+
+    let email = if std::io::stdin().is_terminal() {
+        crate::ui::animated_prompt("Email:")
+    } else {
+        prompt("Email:")
+    };
+    if email.is_empty() {
+        anyhow::bail!("Email is required");
+    }
+
+    let sp = crate::ui::spinner(&format!("Sending code to {email}..."));
+    let resp = http
+        .post(format!("{}/magic-auth", auth_base_url(gateway_url)))
+        .json(&serde_json::json!({
+            "email": email,
+            "client_id": cid,
+        }))
+        .send()
+        .await
+        .context("Failed to send magic auth code")?;
+
+    if !resp.status().is_success() {
+        sp.finish_and_clear();
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if body.contains("user_not_found") || status.as_u16() == 404 {
+            eprintln!("No MageLab account found for {}.", email);
+            println!();
+            println!("  1) Sign in with Google (creates account automatically)");
+            println!("  2) Sign up at {}", SIGNUP_URL);
+            println!();
+            let choice = if std::io::stdin().is_terminal() {
+                crate::ui::animated_prompt("Choose [1/2]:")
+            } else {
+                prompt("Choose [1/2]:")
+            };
+            match choice.as_str() {
+                "1" | "" => return login_google(gateway_url).await,
+                _ => {
+                    eprintln!("Visit {} to create an account, then try again.", SIGNUP_URL);
+                    anyhow::bail!("Account not found");
+                }
+            }
+        }
+        anyhow::bail!("Failed to send magic auth code ({}): {}", status, body);
+    }
+
+    sp.finish_with_message("Code sent! Check your inbox.");
+    let code_input = if std::io::stdin().is_terminal() {
+        crate::ui::animated_prompt("Code:")
+    } else {
+        prompt("Code:")
+    };
+    if code_input.is_empty() {
+        anyhow::bail!("Code is required");
+    }
+
+    let sp = crate::ui::spinner("Authenticating...");
+    let creds = exchange_token(
+        gateway_url,
+        &serde_json::json!({
+            "grant_type": "urn:workos:oauth:grant-type:magic-auth",
+            "code": code_input,
+            "email": email,
+            "client_id": cid,
+        }),
+    )
+    .await?;
+    sp.finish_and_clear();
+
+    creds.save()?;
+    if let Some(ref email) = creds.email {
+        crate::ui::success(&format!("Logged in as {email}"));
+    }
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
+    Ok(creds)
+}
+
+/// Google OAuth login flow — builds auth URL locally, exchanges code through gateway
+async fn login_google(gateway_url: &str) -> Result<Credentials> {
+    // Build auth URL using WorkOS SDK (client-side, no API key needed)
+    let key: ApiKey = "sk_placeholder".to_string().into();
+    let workos = WorkOs::new(&key);
+    let cid_str = client_id();
+    let cid: ClientId = cid_str.clone().into();
+
     let verifier = generate_code_verifier();
     let challenge = generate_code_challenge(&verifier);
     let state = generate_state();
 
-    // Start loopback server on random port
-    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to start loopback server")?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
+        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
+    let redirect_uri = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
 
-    // Build authorize URL
-    let authorize_url = format!(
-        "{}/authorize?provider=google&code_challenge={}&code_challenge_method=S256&redirect_uri={}&response_type=code&state={}&flow_type=pkce",
-        AUTH_URL,
-        urlencoded(&challenge),
-        urlencoded(&redirect_uri),
-        urlencoded(&state),
-    );
+    let provider = Provider::Oauth(OauthProvider::GoogleOAuth);
+    let params = GetAuthorizationUrlParams {
+        client_id: &cid,
+        redirect_uri: &redirect_uri,
+        connection_selector: ConnectionSelector::Provider(&provider),
+        state: Some(&state),
+        code_challenge: Some(CodeChallenge::S256(&challenge)),
+        login_hint: None,
+        domain_hint: None,
+    };
 
-    println!("Opening browser for login...");
-    println!("If browser doesn't open, visit:\n{}\n", authorize_url);
-    open::that(&authorize_url).ok();
+    let authorize_url = workos
+        .user_management()
+        .get_authorization_url(&params)
+        .context("Failed to build WorkOS authorization URL")?;
 
-    // Wait for callback
-    println!("Waiting for authentication...");
+    crate::ui::label("open", authorize_url.as_str());
+    open::that(authorize_url.as_str()).ok();
+
+    let sp = crate::ui::spinner("Waiting for authentication...");
     let (code, returned_state) = wait_for_callback(listener)?;
+    sp.finish_and_clear();
 
-    // Validate state
     if returned_state != state {
         anyhow::bail!("OAuth state mismatch — possible CSRF attack");
     }
 
-    // Exchange code for tokens
-    println!("Exchanging authorization code...");
-    let creds = exchange_code(&code, &verifier, &redirect_uri).await?;
+    let sp = crate::ui::spinner("Exchanging authorization code...");
+    let creds = exchange_token(
+        gateway_url,
+        &serde_json::json!({
+            "grant_type": "authorization_code",
+            "code": code,
+            "code_verifier": verifier,
+            "redirect_uri": redirect_uri,
+            "client_id": cid_str,
+        }),
+    )
+    .await?;
+    sp.finish_and_clear();
 
-    // Save
     creds.save()?;
-    let path = Credentials::path()?;
-    println!("Logged in! Credentials saved to {}", path.display());
-
+    if let Some(ref email) = creds.email {
+        crate::ui::success(&format!("Logged in as {email}"));
+    }
+    crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
 }
 
-/// Generate a cryptographically random PKCE code verifier (43-128 chars, URL-safe)
+/// Exchange a grant (auth code, refresh token, magic auth) for credentials
+/// via the gateway's /v1/auth/token endpoint.
+async fn exchange_token(gateway_url: &str, body: &serde_json::Value) -> Result<Credentials> {
+    let http = reqwest::Client::new();
+    let url = format!("{}/token", auth_base_url(gateway_url));
+
+    let resp = http
+        .post(&url)
+        .json(body)
+        .send()
+        .await
+        .context("Failed to connect to gateway for token exchange")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Token exchange failed ({}): {}", status, body);
+    }
+
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse token response")?;
+
+    let access_token = data["access_token"]
+        .as_str()
+        .context("No access_token in response")?
+        .to_string();
+
+    let refresh_token = data["refresh_token"].as_str().map(String::from);
+    let email = data["user"]["email"].as_str().map(String::from);
+    let user_id = data["user"]["id"].as_str().map(String::from);
+
+    let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
+    let expires_at = chrono::Utc::now().timestamp() + expires_in;
+
+    Ok(Credentials {
+        access_token: Some(access_token),
+        refresh_token,
+        expires_at: Some(expires_at),
+        user_id,
+        email,
+    })
+}
+
 fn generate_code_verifier() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Generate S256 code challenge from verifier
 fn generate_code_challenge(verifier: &str) -> String {
     let hash = Sha256::digest(verifier.as_bytes());
     URL_SAFE_NO_PAD.encode(hash)
 }
 
-/// Generate a random state parameter for CSRF protection
 fn generate_state() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..16).map(|_| rng.gen()).collect();
+    let bytes: Vec<u8> = (0..16).map(|_| rng.gen::<u8>()).collect();
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// URL-encode a string
-fn urlencoded(s: &str) -> String {
-    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-}
-
-/// Wait for the OAuth callback on the loopback server
 fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
-    // Set a timeout so we don't wait forever
-    listener.set_nonblocking(false)?;
+    use std::time::{Duration, Instant};
 
-    let (mut stream, _) = listener.accept().context("No callback received")?;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    listener.set_nonblocking(true)?;
 
+    let (mut stream, _) = loop {
+        match listener.accept() {
+            Ok(conn) => break conn,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "Login timed out — no response received within 3 minutes. Try again."
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        }
+    };
+
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     let mut reader = std::io::BufReader::new(&stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
 
-    // Parse: GET /callback?code=...&state=... HTTP/1.1
     let path = request_line
         .split_whitespace()
         .nth(1)
@@ -120,99 +535,30 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
         .map(|(_, v)| v.to_string())
         .unwrap_or_default();
 
-    // Send success response
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
+    let body = "<html><body><h2>Login successful!</h2><p>You can close this tab and return to the terminal.</p></body></html>";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body,
+    );
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
 }
 
-/// Exchange authorization code for access + refresh tokens
-async fn exchange_code(code: &str, code_verifier: &str, redirect_uri: &str) -> Result<Credentials> {
-    let client = reqwest::Client::new();
-
-    let resp = client
-        .post(format!("{}/token?grant_type=authorization_code", AUTH_URL))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "code": code,
-            "code_verifier": code_verifier,
-            "redirect_uri": redirect_uri,
-        }))
-        .send()
-        .await
-        .context("Failed to exchange auth code")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Token exchange failed ({}): {}", status, body);
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .context("Failed to parse token response")?;
-
-    let access_token = body["access_token"]
-        .as_str()
-        .context("No access_token in response")?
-        .to_string();
-
-    let refresh_token = body["refresh_token"].as_str().map(String::from);
-
-    let expires_in = body["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-
-    let user_id = body["user"]["id"].as_str().map(String::from);
-
-    Ok(Credentials {
-        access_token: Some(access_token),
-        refresh_token,
-        expires_at: Some(expires_at),
-        user_id,
-    })
-}
-
-/// Refresh an expired access token using the refresh token
+/// Refresh an expired access token via the gateway
 #[allow(dead_code)]
-pub async fn refresh_token(refresh_token: &str) -> Result<Credentials> {
-    let client = reqwest::Client::new();
-
-    let resp = client
-        .post(format!("{}/token?grant_type=refresh_token", AUTH_URL))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "refresh_token": refresh_token,
-        }))
-        .send()
-        .await
-        .context("Failed to refresh token")?;
-
-    if !resp.status().is_success() {
-        anyhow::bail!("Token refresh failed — please run `mage login` again");
-    }
-
-    let body: serde_json::Value = resp.json().await?;
-
-    let access_token = body["access_token"]
-        .as_str()
-        .context("No access_token in refresh response")?
-        .to_string();
-
-    let new_refresh = body["refresh_token"].as_str().map(String::from);
-    let expires_in = body["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-    let user_id = body["user"]["id"].as_str().map(String::from);
-
-    let creds = Credentials {
-        access_token: Some(access_token),
-        refresh_token: new_refresh,
-        expires_at: Some(expires_at),
-        user_id,
-    };
+pub async fn refresh_token(gateway_url: &str, rt: &str) -> Result<Credentials> {
+    let creds = exchange_token(
+        gateway_url,
+        &serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": rt,
+            "client_id": client_id(),
+        }),
+    )
+    .await?;
     creds.save()?;
-
     Ok(creds)
 }
 
@@ -222,20 +568,31 @@ pub async fn ensure_valid_jwt(gateway_url: &str) -> Result<String> {
     let creds = Credentials::load()?;
 
     if creds.is_token_valid() {
-        return Ok(creds.access_token.unwrap());
+        return creds
+            .access_token
+            .ok_or_else(|| anyhow::anyhow!("Token marked valid but access_token is missing"));
     }
 
-    // Try refresh
-    if let Some(ref rt) = creds.refresh_token {
-        match refresh_token(rt).await {
-            Ok(new_creds) => return Ok(new_creds.access_token.unwrap()),
-            Err(_) => {
-                // Refresh failed — need full login
-            }
+    // Try biometric-protected refresh token first
+    if let Ok(Some(bio_refresh)) = super::touchid::load_secure() {
+        if let Ok(new_creds) = refresh_token(gateway_url, &bio_refresh).await {
+            return new_creds
+                .access_token
+                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
         }
     }
 
-    // Need full login
+    // Fall back to regular refresh token
+    if let Some(ref rt) = creds.refresh_token {
+        if let Ok(new_creds) = refresh_token(gateway_url, rt).await {
+            return new_creds
+                .access_token
+                .ok_or_else(|| anyhow::anyhow!("Refresh succeeded but no access_token returned"));
+        }
+    }
+
     let new_creds = login(gateway_url).await?;
-    Ok(new_creds.access_token.unwrap())
+    new_creds
+        .access_token
+        .ok_or_else(|| anyhow::anyhow!("Login succeeded but no access_token returned"))
 }
