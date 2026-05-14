@@ -1,4 +1,5 @@
 mod account;
+mod analytics;
 mod auth;
 mod client;
 mod config;
