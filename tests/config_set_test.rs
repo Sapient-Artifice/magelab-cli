@@ -38,3 +38,19 @@ fn test_config_set_api_key_is_rejected() {
     let result = config.set_value("api_key", "mage_test123");
     assert!(result.is_err());
 }
+
+#[test]
+fn test_config_set_telemetry_true() {
+    let mut config = magelab_cli::config::Config::default();
+    config.set_value("telemetry", "false").unwrap();
+    assert_eq!(config.telemetry(), false);
+    config.set_value("telemetry", "true").unwrap();
+    assert_eq!(config.telemetry(), true);
+}
+
+#[test]
+fn test_config_set_telemetry_invalid_value() {
+    let mut config = magelab_cli::config::Config::default();
+    let result = config.set_value("telemetry", "maybe");
+    assert!(result.is_err());
+}

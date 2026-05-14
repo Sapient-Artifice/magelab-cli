@@ -100,3 +100,48 @@ fn test_config_with_default_device() {
     let config = magelab_cli::config::Config::load_from(config_path).unwrap();
     assert_eq!(config.default_device.as_deref(), Some("macbook-pro"));
 }
+
+#[test]
+fn test_telemetry_defaults_to_true() {
+    let config = magelab_cli::config::Config::default();
+    assert_eq!(config.telemetry(), true);
+}
+
+#[test]
+fn test_telemetry_deserialized_from_toml() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("cli.toml");
+    std::fs::write(&path, "telemetry = false\n").unwrap();
+
+    let config = magelab_cli::config::Config::load_from(&path).unwrap();
+    assert_eq!(config.telemetry(), false);
+}
+
+#[test]
+fn test_telemetry_missing_defaults_to_true() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("cli.toml");
+    std::fs::write(&path, "default_model = \"test\"\n").unwrap();
+
+    let config = magelab_cli::config::Config::load_from(&path).unwrap();
+    assert_eq!(config.telemetry(), true);
+}
+
+#[test]
+fn test_activated_user_id_defaults_to_none() {
+    let config = magelab_cli::config::Config::default();
+    assert!(config.activated_user_id.is_none());
+}
+
+#[test]
+fn test_activated_user_id_round_trips() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("cli.toml");
+
+    let mut config = magelab_cli::config::Config::default();
+    config.activated_user_id = Some("uuid-123".to_string());
+    config.save_to(&path).unwrap();
+
+    let loaded = magelab_cli::config::Config::load_from(&path).unwrap();
+    assert_eq!(loaded.activated_user_id.as_deref(), Some("uuid-123"));
+}

@@ -37,6 +37,12 @@ pub struct Config {
     /// Enable relay — register headless backend as a device with the gateway
     #[serde(default)]
     pub relay_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub telemetry: Option<bool>,
+
+    #[serde(default)]
+    pub activated_user_id: Option<String>,
 }
 
 fn default_model() -> String {
@@ -53,6 +59,9 @@ fn default_prefer() -> String {
 }
 fn default_theme() -> String {
     "auto".into()
+}
+fn default_true() -> Option<bool> {
+    Some(true)
 }
 fn default_auto_approve() -> Vec<String> {
     vec![
@@ -75,6 +84,8 @@ impl Default for Config {
             theme: default_theme(),
             default_device: None,
             relay_enabled: false,
+            telemetry: default_true(),
+            activated_user_id: None,
         }
     }
 }
@@ -125,6 +136,12 @@ impl Config {
         Ok(())
     }
 
+    /// Whether telemetry is enabled (default: true)
+    #[allow(dead_code)] // Used by analytics module (added in next commit)
+    pub fn telemetry(&self) -> bool {
+        self.telemetry.unwrap_or(true)
+    }
+
     /// Get API key from MAGELAB_API_KEY env var.
     /// Plaintext api_key in cli.toml is deprecated — use the desktop app or env var.
     pub fn api_key(&self) -> Option<String> {
@@ -142,6 +159,13 @@ impl Config {
             "theme" => self.theme = value.to_string(),
             "default_device" => self.default_device = Some(value.to_string()),
             "relay_enabled" => self.relay_enabled = value.parse::<bool>().unwrap_or(false),
+            "telemetry" => {
+                self.telemetry = Some(match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => anyhow::bail!("telemetry must be 'true' or 'false'"),
+                });
+            }
             _ => anyhow::bail!("Unknown config key: {}", key),
         }
         Ok(())
