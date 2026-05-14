@@ -209,10 +209,7 @@ impl Vault {
                 if let Ok(json_str) = String::from_utf8(data) {
                     if let Ok(stored_keys) = serde_json::from_str::<Vec<String>>(&json_str) {
                         for k in stored_keys {
-                            if !keys.contains(&k)
-                                && !k.starts_with("__")
-                                && k != "refresh_token"
-                            {
+                            if !keys.contains(&k) && !k.starts_with("__") && k != "refresh_token" {
                                 keys.push(k);
                             }
                         }

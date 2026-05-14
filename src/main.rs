@@ -251,12 +251,7 @@ async fn main() -> Result<()> {
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "mage",
-                &mut std::io::stdout(),
-            );
+            clap_complete::generate(shell, &mut Cli::command(), "mage", &mut std::io::stdout());
             Ok(())
         }
         Commands::SetupPi { uninstall, dev } => cmd_setup_pi(uninstall, dev),
@@ -285,15 +280,12 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
         println!("Token: {}", if valid { "valid" } else { "expired" });
     }
     // Show vault status
-    match vault::Vault::open() {
-        Ok(v) => {
-            if let Ok(keys) = v.list() {
-                if !keys.is_empty() {
-                    println!("Vault: {} key(s)", keys.len());
-                }
+    if let Ok(v) = vault::Vault::open() {
+        if let Ok(keys) = v.list() {
+            if !keys.is_empty() {
+                println!("Vault: {} key(s)", keys.len());
             }
         }
-        Err(_) => {} // No vault — normal, don't print anything
     }
     if let Some(key) = config.api_key() {
         let preview = if key.len() > 8 {
@@ -421,17 +413,14 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         ui::success(&format!("Backend ready at {}", config.local_url));
 
         // Auto-push vault secrets (same as desktop's initSecrets startup flow)
-        match vault::Vault::open() {
-            Ok(v) => {
-                if let Ok(secrets) = v.all_secrets() {
-                    if !secrets.is_empty() {
-                        if let Err(e) = push_vault_secrets(config).await {
-                            eprintln!("Warning: vault push failed: {e}");
-                        }
+        if let Ok(v) = vault::Vault::open() {
+            if let Ok(secrets) = v.all_secrets() {
+                if !secrets.is_empty() {
+                    if let Err(e) = push_vault_secrets(config).await {
+                        eprintln!("Warning: vault push failed: {e}");
                     }
                 }
             }
-            Err(_) => {} // No vault — normal, skip silently
         }
     } else {
         ui::success("Backend launched");
@@ -471,7 +460,10 @@ async fn cmd_status(config: &Config) -> Result<()> {
         Err(_) => println!("Vault: not available"),
     }
     if let Some(key) = config.api_key() {
-        println!("API key (env): configured ({}...)", &key[..4.min(key.len())]);
+        println!(
+            "API key (env): configured ({}...)",
+            &key[..4.min(key.len())]
+        );
     }
 
     Ok(())
@@ -537,7 +529,12 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
                 // Push new key to running backend (if running)
                 let push_url = format!("{}/api/auth/push_secrets", config.local_url);
                 let body = serde_json::json!({ "secrets": { "magelab_api_key": key_value } });
-                match reqwest::Client::new().post(&push_url).json(&body).send().await {
+                match reqwest::Client::new()
+                    .post(&push_url)
+                    .json(&body)
+                    .send()
+                    .await
+                {
                     Ok(resp) if resp.status().is_success() => {
                         println!("API key pushed to running backend.");
                     }
@@ -660,9 +657,9 @@ async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result
 
     let ws_url = connect::to_ws_url(&config.local_url);
 
-    let (mut ws, _) = connect_async(&ws_url).await.map_err(|_| {
-        anyhow::anyhow!("Backend not running. Start it with `mage launch`")
-    })?;
+    let (mut ws, _) = connect_async(&ws_url)
+        .await
+        .map_err(|_| anyhow::anyhow!("Backend not running. Start it with `mage launch`"))?;
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut got_response = false;
@@ -977,11 +974,8 @@ fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let config = Config::load().unwrap_or_default();
     let port = detect::port_from_url(&config.local_url);
     let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-    let backend_running = std::net::TcpStream::connect_timeout(
-        &addr,
-        std::time::Duration::from_millis(500),
-    )
-    .is_ok();
+    let backend_running =
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).is_ok();
 
     println!();
     println!("  Quickstart");
