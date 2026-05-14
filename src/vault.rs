@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use zeroize::Zeroizing;
@@ -108,6 +109,119 @@ impl Vault {
             key_provider,
             snapshot_path,
         })
+    }
+
+    /// Get a secret by key name. Returns None if the key doesn't exist in the store.
+    ///
+    /// Loads a fresh snapshot each call to pick up changes made by the desktop app.
+    pub fn get(&self, key: &str) -> Result<Option<String>, VaultError> {
+        let stronghold = iota_stronghold::Stronghold::default();
+        let client = stronghold
+            .load_client_from_snapshot(
+                self.config.client_name,
+                &self.key_provider,
+                &self.snapshot_path,
+            )
+            .map_err(|e| VaultError::Other(anyhow::anyhow!("load client: {e}")))?;
+
+        let store = client.store();
+        match store.get(key.as_bytes()) {
+            Ok(Some(data)) => {
+                let value = String::from_utf8(data)
+                    .map_err(|e| VaultError::Other(anyhow::anyhow!("UTF-8 decode: {e}")))?;
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(trimmed))
+                }
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(VaultError::Other(anyhow::anyhow!("store get: {e}"))),
+        }
+    }
+
+    /// List all stored key names (no values).
+    pub fn list(&self) -> Result<Vec<String>, VaultError> {
+        let all_keys = self.discover_keys()?;
+        let stronghold = iota_stronghold::Stronghold::default();
+        let client = stronghold
+            .load_client_from_snapshot(
+                self.config.client_name,
+                &self.key_provider,
+                &self.snapshot_path,
+            )
+            .map_err(|e| VaultError::Other(anyhow::anyhow!("load client: {e}")))?;
+
+        let store = client.store();
+        let mut present = Vec::new();
+        for key in &all_keys {
+            if let Ok(Some(data)) = store.get(key.as_bytes()) {
+                let value = String::from_utf8_lossy(&data);
+                if !value.trim().is_empty() {
+                    present.push(key.clone());
+                }
+            }
+        }
+        Ok(present)
+    }
+
+    /// Read all secrets as key-value pairs.
+    pub fn all_secrets(&self) -> Result<HashMap<String, String>, VaultError> {
+        let all_keys = self.discover_keys()?;
+        let stronghold = iota_stronghold::Stronghold::default();
+        let client = stronghold
+            .load_client_from_snapshot(
+                self.config.client_name,
+                &self.key_provider,
+                &self.snapshot_path,
+            )
+            .map_err(|e| VaultError::Other(anyhow::anyhow!("load client: {e}")))?;
+
+        let store = client.store();
+        let mut secrets = HashMap::new();
+        for key in &all_keys {
+            if let Ok(Some(data)) = store.get(key.as_bytes()) {
+                if let Ok(value) = String::from_utf8(data) {
+                    let trimmed = value.trim().to_string();
+                    if !trimmed.is_empty() {
+                        secrets.insert(key.clone(), trimmed);
+                    }
+                }
+            }
+        }
+        Ok(secrets)
+    }
+
+    /// Build the full list of keys to probe: static SECRET_KEYS + dynamic keys from __vault_keys.
+    fn discover_keys(&self) -> Result<Vec<String>, VaultError> {
+        let mut keys: Vec<String> = SECRET_KEYS.iter().map(|s| s.to_string()).collect();
+
+        // Try to read __vault_keys metadata for dynamic provider_api_key:* entries
+        let stronghold = iota_stronghold::Stronghold::default();
+        if let Ok(client) = stronghold.load_client_from_snapshot(
+            self.config.client_name,
+            &self.key_provider,
+            &self.snapshot_path,
+        ) {
+            let store = client.store();
+            if let Ok(Some(data)) = store.get(b"__vault_keys") {
+                if let Ok(json_str) = String::from_utf8(data) {
+                    if let Ok(stored_keys) = serde_json::from_str::<Vec<String>>(&json_str) {
+                        for k in stored_keys {
+                            if !keys.contains(&k)
+                                && !k.starts_with("__")
+                                && k != "refresh_token"
+                            {
+                                keys.push(k);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(keys)
     }
 }
 
