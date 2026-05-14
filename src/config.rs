@@ -143,11 +143,10 @@ impl Config {
         self.telemetry.unwrap_or(true)
     }
 
-    /// Get API key: env var first, then deprecated cli.toml field as fallback.
+    /// Get API key from MAGELAB_API_KEY env var only.
+    /// The plaintext api_key field in cli.toml is deprecated and ignored.
     pub fn api_key(&self) -> Option<String> {
-        std::env::var("MAGELAB_API_KEY")
-            .ok()
-            .or_else(|| self.api_key.clone())
+        std::env::var("MAGELAB_API_KEY").ok()
     }
 
     /// Set a config value by key name
@@ -160,7 +159,13 @@ impl Config {
             "prefer" => self.prefer = value.to_string(),
             "theme" => self.theme = value.to_string(),
             "default_device" => self.default_device = Some(value.to_string()),
-            "relay_enabled" => self.relay_enabled = value.parse::<bool>().unwrap_or(false),
+            "relay_enabled" => {
+                self.relay_enabled = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => anyhow::bail!("relay_enabled must be 'true' or 'false'"),
+                };
+            }
             "telemetry" => {
                 self.telemetry = Some(match value {
                     "true" => true,

@@ -53,10 +53,15 @@ pub async fn list_keys(client: &RemoteClient) -> Result<()> {
         println!("{:<8} {:<30} {:<10} CREATED", "ID", "KEY", "STATUS");
         println!("{}", "─".repeat(65));
         for key in keys {
-            let id = key["id"]
-                .as_str()
-                .or(key["id"].as_i64().map(|_| ""))
-                .unwrap_or("?");
+            let id_str;
+            let id = if let Some(s) = key["id"].as_str() {
+                s
+            } else if let Some(n) = key["id"].as_i64() {
+                id_str = n.to_string();
+                &id_str
+            } else {
+                "?"
+            };
             let val = key["key_preview"].as_str().unwrap_or("***");
             let revoked = key["is_revoked"].as_bool().unwrap_or(false);
             let status = if revoked { "revoked" } else { "active" };

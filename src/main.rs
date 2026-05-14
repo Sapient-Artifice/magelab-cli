@@ -810,9 +810,8 @@ async fn get_token(config: &Config) -> Result<String> {
                 return Ok(key);
             }
         }
-        Err(e) => {
-            // Vault errors are debug-level — many users won't have the desktop installed
-            eprintln!("debug: vault unavailable: {e}");
+        Err(_) => {
+            // Vault unavailable is expected — many users won't have the desktop installed
         }
     }
 

@@ -34,6 +34,32 @@ fn test_activation_fires_for_different_user() {
     ));
 }
 
+#[tokio::test]
+async fn test_track_activation_persists_user_id() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("cli.toml");
+    let mut config = magelab_cli::config::Config::default();
+    config.save_to(&path).unwrap();
+
+    // PostHog client not initialized — capture will silently fail, but
+    // activated_user_id should still be persisted
+    magelab_cli::analytics::track_activation("user-42", "models", &mut config).await;
+
+    assert_eq!(config.activated_user_id.as_deref(), Some("user-42"));
+}
+
+#[tokio::test]
+async fn test_track_activation_is_idempotent() {
+    let mut config = magelab_cli::config::Config::default();
+    config.activated_user_id = Some("user-42".to_string());
+
+    // Should be a no-op — already activated for this user
+    magelab_cli::analytics::track_activation("user-42", "models", &mut config).await;
+
+    // Still the same user
+    assert_eq!(config.activated_user_id.as_deref(), Some("user-42"));
+}
+
 #[test]
 fn test_activation_skips_when_telemetry_disabled() {
     let mut config = magelab_cli::config::Config::default();
