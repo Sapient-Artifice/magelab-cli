@@ -419,6 +419,20 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
         detect::wait_for_backend(&config.local_url, std::time::Duration::from_secs(30)).await?;
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", config.local_url));
+
+        // Auto-push vault secrets (same as desktop's initSecrets startup flow)
+        match vault::Vault::open() {
+            Ok(v) => {
+                if let Ok(secrets) = v.all_secrets() {
+                    if !secrets.is_empty() {
+                        if let Err(e) = push_vault_secrets(config).await {
+                            eprintln!("Warning: vault push failed: {e}");
+                        }
+                    }
+                }
+            }
+            Err(_) => {} // No vault — normal, skip silently
+        }
     } else {
         ui::success("Backend launched");
         ui::label("check", "mage status");
