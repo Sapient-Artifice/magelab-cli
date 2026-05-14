@@ -189,12 +189,15 @@ export type ServerMessage =
 const rustCode = genRust();
 const tsCode = genTypeScript();
 
-const rustPath = resolve(__dirname, "../src/client/messages.rs");
+const rustCliPath = resolve(__dirname, "../src/client/messages.rs");
+const rustCorePath = resolve(__dirname, "../../crates/magelab-core/src/protocol/generated.rs");
 const tsPath = resolve(__dirname, "../extension/src/protocol.ts");
 
-writeFileSync(rustPath, rustCode);
+writeFileSync(rustCliPath, rustCode);
+writeFileSync(rustCorePath, rustCode);
 writeFileSync(tsPath, tsCode);
 
 console.log(`Generated:`);
-console.log(`  ${rustPath}`);
+console.log(`  ${rustCliPath}`);
+console.log(`  ${rustCorePath}`);
 console.log(`  ${tsPath}`);
