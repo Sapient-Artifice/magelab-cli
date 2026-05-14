@@ -92,10 +92,15 @@ enum Commands {
         #[command(subcommand)]
         action: KeysAction,
     },
-    /// Show or update configuration
+    /// Show or update CLI configuration (local config file)
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
+    },
+    /// Show or change backend runtime settings (via WebSocket)
+    Settings {
+        #[command(subcommand)]
+        action: Option<SettingsAction>,
     },
     /// Generate shell completions
     Completions {
@@ -140,6 +145,17 @@ enum KeysAction {
 enum ConfigAction {
     /// Set a config value
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum SettingsAction {
+    /// Set a backend setting (model, voice)
+    Set {
+        /// Setting name: model, voice
+        key: String,
+        /// New value
+        value: String,
+    },
 }
 
 #[tokio::main]
@@ -207,6 +223,7 @@ async fn main() -> Result<()> {
             cmd_keys(&config, action).await
         }
         Commands::Config { action } => cmd_config(&mut config, action),
+        Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
             clap_complete::generate(
                 shell,
@@ -477,6 +494,111 @@ fn cmd_config(config: &mut Config, action: Option<ConfigAction>) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Show or change backend runtime settings via WebSocket
+async fn cmd_settings(config: &Config, action: Option<SettingsAction>) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::connect_async;
+
+    // Validate key early before connecting
+    if let Some(SettingsAction::Set { ref key, .. }) = action {
+        match key.as_str() {
+            "model" | "voice" => {}
+            _ => anyhow::bail!("Unknown setting '{}'. Available: model, voice", key),
+        }
+    }
+
+    let ws_url = connect::to_ws_url(&config.local_url);
+
+    let (mut ws, _) = connect_async(&ws_url).await.map_err(|_| {
+        anyhow::anyhow!("Backend not running. Start it with `mage launch`")
+    })?;
+
+    match action {
+        None => {
+            // Get runtime config
+            let msg = serde_json::json!({"type": "get_runtime_config"});
+            ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                msg.to_string(),
+            ))
+            .await?;
+
+            // Read responses until we get runtime_config
+            while let Some(Ok(raw)) = ws.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = raw {
+                    let v: serde_json::Value = serde_json::from_str(&text)?;
+                    if v.get("type").and_then(|t| t.as_str()) == Some("runtime_config") {
+                        println!(
+                            "Model:    {}",
+                            v["llm_model_name"].as_str().unwrap_or("—")
+                        );
+                        println!(
+                            "Provider: {}",
+                            v["llm_provider_name"].as_str().unwrap_or("—")
+                        );
+                        println!(
+                            "Endpoint: {}",
+                            v["llm_endpoint"].as_str().unwrap_or("—")
+                        );
+                        println!(
+                            "Voice:    {}",
+                            v["voice_model"].as_str().unwrap_or("—")
+                        );
+                        println!(
+                            "TTS:      {}",
+                            if v["tts_stream"].as_bool().unwrap_or(false) {
+                                "streaming"
+                            } else {
+                                "buffered"
+                            }
+                        );
+                        println!(
+                            "Mute:     {}",
+                            v["mute"].as_bool().unwrap_or(true)
+                        );
+                        if let Some(chat) = v["chat_id"].as_str() {
+                            println!("Chat:     {}", chat);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        Some(SettingsAction::Set { key, value }) => {
+            let msg = match key.as_str() {
+                "model" => serde_json::json!({"type": "set_model", "model": value}),
+                "voice" => serde_json::json!({"type": "set_voice", "voice": value}),
+                _ => anyhow::bail!(
+                    "Unknown setting '{}'. Available: model, voice",
+                    key
+                ),
+            };
+            let expect_type = format!("set_{}_result", key);
+
+            ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                msg.to_string(),
+            ))
+            .await?;
+
+            while let Some(Ok(raw)) = ws.next().await {
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = raw {
+                    let v: serde_json::Value = serde_json::from_str(&text)?;
+                    if v.get("type").and_then(|t| t.as_str()) == Some(&expect_type) {
+                        if v["ok"].as_bool() == Some(true) {
+                            ui::success(&format!("{} → {}", key, value));
+                        } else {
+                            anyhow::bail!("Backend rejected update");
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    ws.close(None).await.ok();
+    Ok(())
 }
 
 /// Get the best available token (JWT preferred, API key fallback)

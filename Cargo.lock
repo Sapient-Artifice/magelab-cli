@@ -1583,6 +1583,7 @@ dependencies = [
  "core-foundation-sys",
  "crossterm",
  "dirs",
+ "futures-util",
  "indicatif",
  "keyring",
  "mockall",
