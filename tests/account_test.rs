@@ -110,7 +110,7 @@ async fn test_list_keys_success() {
 }
 
 #[tokio::test]
-async fn test_create_key_success() {
+async fn test_create_key_returns_key_value() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/generate-api-key"))
@@ -123,6 +123,24 @@ async fn test_create_key_success() {
     let client = RemoteClient::new(&server.uri(), "tok");
     let result = account::create_key(&client).await;
     assert!(result.is_ok());
+    assert_eq!(result.unwrap(), Some("mage_brand_new_key".to_string()));
+}
+
+#[tokio::test]
+async fn test_create_key_returns_none_when_no_key_in_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/generate-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "ok"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = RemoteClient::new(&server.uri(), "tok");
+    let result = account::create_key(&client).await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), None);
 }
 
 #[tokio::test]

@@ -67,13 +67,15 @@ pub async fn list_keys(client: &RemoteClient) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_key(client: &RemoteClient) -> Result<()> {
+pub async fn create_key(client: &RemoteClient) -> Result<Option<String>> {
     let resp = client.generate_key().await?;
     if let Some(key) = resp["api_key"].as_str() {
         println!("New API key: {}", key);
         println!("Save this — it won't be shown again.");
+        Ok(Some(key.to_string()))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 pub async fn revoke_key(client: &RemoteClient, key_id: &str) -> Result<()> {

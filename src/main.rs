@@ -531,7 +531,23 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
     let client = RemoteClient::new(&config.gateway_url, &token);
     match action {
         KeysAction::List => account::list_keys(&client).await,
-        KeysAction::Create => account::create_key(&client).await,
+        KeysAction::Create => {
+            let new_key = account::create_key(&client).await?;
+            if let Some(key_value) = new_key {
+                // Push new key to running backend (if running)
+                let push_url = format!("{}/api/auth/push_secrets", config.local_url);
+                let body = serde_json::json!({ "secrets": { "magelab_api_key": key_value } });
+                match reqwest::Client::new().post(&push_url).json(&body).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        println!("API key pushed to running backend.");
+                    }
+                    _ => {
+                        println!("Set this key in the desktop app to persist it in the vault.");
+                    }
+                }
+            }
+            Ok(())
+        }
         KeysAction::Revoke { id } => account::revoke_key(&client, &id).await,
     }
 }
