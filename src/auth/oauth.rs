@@ -24,8 +24,10 @@ pub async fn login(_gateway_url: &str) -> Result<Credentials> {
     let challenge = generate_code_challenge(&verifier);
     let state = generate_state();
 
-    // Start loopback server on random port
-    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to start loopback server")?;
+    // Start loopback server on fixed port (must match Google OAuth authorized redirect URIs)
+    let listener = TcpListener::bind("127.0.0.1:19287")
+        .or_else(|_| TcpListener::bind("127.0.0.1:19288"))
+        .context("Failed to start loopback server — ports 19287 and 19288 both in use")?;
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
 
