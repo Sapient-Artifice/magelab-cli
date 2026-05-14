@@ -21,7 +21,7 @@ pub struct RuntimeSettings {
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
-            model: "qwen-3-235b-a22b-instruct-2507".into(),
+            model: crate::config::DEFAULT_MODEL.into(),
             provider: "mage lab gateway".into(),
             endpoint: "https://api.magelab.ai/v1".into(),
             yolo_mode: false,

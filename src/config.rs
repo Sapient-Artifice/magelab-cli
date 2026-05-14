@@ -45,8 +45,10 @@ pub struct Config {
     pub activated_user_id: Option<String>,
 }
 
+pub const DEFAULT_MODEL: &str = "qwen-3-235b-a22b-instruct-2507";
+
 fn default_model() -> String {
-    "qwen-3-235b-a22b-instruct-2507".into()
+    DEFAULT_MODEL.into()
 }
 fn default_gateway_url() -> String {
     "https://api.magelab.ai".into()
@@ -141,10 +143,11 @@ impl Config {
         self.telemetry.unwrap_or(true)
     }
 
-    /// Get API key from MAGELAB_API_KEY env var.
-    /// Plaintext api_key in cli.toml is deprecated — use the desktop app or env var.
+    /// Get API key: env var first, then deprecated cli.toml field as fallback.
     pub fn api_key(&self) -> Option<String> {
-        std::env::var("MAGELAB_API_KEY").ok()
+        std::env::var("MAGELAB_API_KEY")
+            .ok()
+            .or_else(|| self.api_key.clone())
     }
 
     /// Set a config value by key name

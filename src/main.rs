@@ -187,7 +187,9 @@ async fn main() -> Result<()> {
         );
     }
 
-    analytics::init().await;
+    if config.telemetry() {
+        analytics::init().await;
+    }
 
     // Set Touch ID disable flag before any command dispatch
     auth::touchid::set_disabled(cli.no_touchid);

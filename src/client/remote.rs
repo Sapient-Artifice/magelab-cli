@@ -63,9 +63,7 @@ impl RemoteClient {
             .send()
             .await
             .with_context(|| format!("Request failed: GET {}", path))?;
-        resp.json()
-            .await
-            .with_context(|| format!("Failed to parse response from {}", path))
+        Self::parse_response(resp, path).await
     }
 
     async fn post(&self, path: &str, body: &Value) -> Result<Value> {
@@ -78,6 +76,15 @@ impl RemoteClient {
             .send()
             .await
             .with_context(|| format!("Request failed: POST {}", path))?;
+        Self::parse_response(resp, path).await
+    }
+
+    async fn parse_response(resp: reqwest::Response, path: &str) -> Result<Value> {
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("{} returned {}: {}", path, status, body);
+        }
         resp.json()
             .await
             .with_context(|| format!("Failed to parse response from {}", path))
