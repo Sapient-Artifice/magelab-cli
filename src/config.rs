@@ -137,7 +137,6 @@ impl Config {
     }
 
     /// Whether telemetry is enabled (default: true)
-    #[allow(dead_code)] // Used by analytics module (added in next commit)
     pub fn telemetry(&self) -> bool {
         self.telemetry.unwrap_or(true)
     }

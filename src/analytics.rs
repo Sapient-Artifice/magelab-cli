@@ -1,5 +1,3 @@
-#![allow(dead_code)] // All items used after handler wiring (Task 3)
-
 use crate::config::Config;
 use serde_json::{json, Value};
 use std::time::Duration;

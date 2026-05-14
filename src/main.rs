@@ -187,6 +187,8 @@ async fn main() -> Result<()> {
         );
     }
 
+    analytics::init().await;
+
     // Set Touch ID disable flag before any command dispatch
     auth::touchid::set_disabled(cli.no_touchid);
 
@@ -217,7 +219,7 @@ async fn main() -> Result<()> {
             auth::touchid::verify(auth::touchid::Tier::Cached, "connect")?;
             cmd_connect(&config, json, no_launch, local, relay, remote).await
         }
-        Commands::Launch { wait } => cmd_launch(&config, wait).await,
+        Commands::Launch { wait } => cmd_launch(&mut config, wait).await,
         Commands::Status => cmd_status(&config).await,
         Commands::Devices { action, json } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access devices")?;
@@ -225,6 +227,11 @@ async fn main() -> Result<()> {
         }
         Commands::Models => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access account info")?;
+            if let Ok(creds) = auth::credentials::Credentials::load() {
+                if let Some(uid) = &creds.user_id {
+                    analytics::track_activation(uid, "models", &mut config).await;
+                }
+            }
             cmd_account(&config, "models").await
         }
         Commands::Usage => {
@@ -246,7 +253,7 @@ async fn main() -> Result<()> {
             }
             cmd_keys(&config, action).await
         }
-        Commands::Vault { action } => cmd_vault(&config, action).await,
+        Commands::Vault { action } => cmd_vault(&mut config, action).await,
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
@@ -264,6 +271,19 @@ async fn main() -> Result<()> {
 async fn cmd_login(config: &Config, method: &str) -> Result<()> {
     let m: auth::oauth::LoginMethod = method.parse()?;
     auth::oauth::login_with_method(&config.gateway_url, &m).await?;
+
+    if let Ok(creds) = auth::credentials::Credentials::load() {
+        if let Some(uid) = &creds.user_id {
+            analytics::track(
+                "user_signed_in",
+                uid,
+                serde_json::json!({ "auth_method": method }),
+                config,
+            )
+            .await;
+        }
+    }
+
     Ok(())
 }
 
@@ -374,6 +394,25 @@ async fn cmd_connect(
         connect::resolve(config, no_launch).await?
     };
 
+    // Track activation funnel: connect
+    if result.mode != "none" {
+        if let Ok(creds) = auth::credentials::Credentials::load() {
+            if let Some(uid) = &creds.user_id {
+                let backend_type = match result.mode.as_str() {
+                    "local" | "relay" => "local",
+                    _ => "cloud",
+                };
+                analytics::track(
+                    "cli_connect_completed",
+                    uid,
+                    serde_json::json!({ "backend_type": backend_type }),
+                    config,
+                )
+                .await;
+            }
+        }
+    }
+
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     } else {
@@ -395,7 +434,7 @@ async fn cmd_connect(
     Ok(())
 }
 
-async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
+async fn cmd_launch(config: &mut Config, wait: bool) -> Result<()> {
     let home = detect::find_magelab_home(config.magelab_home.as_deref()).ok_or_else(|| {
         anyhow::anyhow!("MageLab installation not found. Set magelab_home in config.")
     })?;
@@ -424,6 +463,12 @@ async fn cmd_launch(config: &Config, wait: bool) -> Result<()> {
     } else {
         ui::success("Backend launched");
         ui::label("check", "mage status");
+    }
+
+    if let Ok(creds) = auth::credentials::Credentials::load() {
+        if let Some(uid) = &creds.user_id {
+            analytics::track_activation(uid, "launch", config).await;
+        }
     }
 
     Ok(())
@@ -548,7 +593,7 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
     }
 }
 
-async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
+async fn cmd_vault(config: &mut Config, action: Option<VaultAction>) -> Result<()> {
     match action {
         None => {
             // mage vault — list key names
@@ -575,6 +620,11 @@ async fn cmd_vault(config: &Config, action: Option<VaultAction>) -> Result<()> {
         }
         Some(VaultAction::Get { key }) => {
             auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
+            if let Ok(creds) = auth::credentials::Credentials::load() {
+                if let Some(uid) = &creds.user_id {
+                    analytics::track_activation(uid, "vault_get", config).await;
+                }
+            }
             let vault = magelab_core::vault::Vault::open()?;
             match vault.get(&key)? {
                 Some(value) => {
