@@ -32,6 +32,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: Sapient-Artifice/magelab
+          ref: main
+      - name: Overlay CLI source
+        uses: actions/checkout@v4
+        with:
+          path: magelab-cli
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -48,7 +55,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} -p magelab-cli
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
