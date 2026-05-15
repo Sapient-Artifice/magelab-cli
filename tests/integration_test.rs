@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::time::Duration;
 
 #[test]
 fn test_version_command() {
@@ -51,6 +52,8 @@ fn test_auth_token_fails_when_not_logged_in() {
     Command::cargo_bin("mage")
         .unwrap()
         .args(["auth", "token"])
+        .timeout(Duration::from_secs(10))
+        .env_remove("MAGELAB_API_KEY")
         .assert()
         .failure();
 }
@@ -72,6 +75,7 @@ fn test_models_without_auth_fails() {
     Command::cargo_bin("mage")
         .unwrap()
         .arg("models")
+        .timeout(Duration::from_secs(10))
         .env_remove("MAGELAB_API_KEY")
         .assert()
         .failure();
