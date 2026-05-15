@@ -40,12 +40,13 @@ async fn test_resolve_local_backend_running() {
 #[tokio::test]
 #[serial]
 async fn test_resolve_falls_to_remote_with_api_key() {
-    std::env::remove_var("MAGELAB_API_KEY");
-    // No local backend, no JWT, but has API key
-    let mut config = config_with_local("http://127.0.0.1:1"); // won't connect
-    config.api_key = Some("mage_test_key".to_string());
+    // No local backend, no JWT, but has API key via env var
+    let config = config_with_local("http://127.0.0.1:1"); // won't connect
+    std::env::set_var("MAGELAB_API_KEY", "mage_test_key");
 
     let result = connect::resolve(&config, true).await.unwrap();
+
+    std::env::remove_var("MAGELAB_API_KEY");
 
     assert_eq!(result.mode, "remote");
     assert_eq!(result.token.as_deref(), Some("mage_test_key"));
@@ -83,12 +84,13 @@ async fn test_resolve_no_launch_skips_backend_launch() {
 #[tokio::test]
 #[serial]
 async fn test_resolve_remote_includes_gateway_url() {
-    std::env::remove_var("MAGELAB_API_KEY");
     let mut config = config_with_local("http://127.0.0.1:1");
     config.gateway_url = "https://custom-gateway.example.com".to_string();
-    config.api_key = Some("mage_key".to_string());
+    std::env::set_var("MAGELAB_API_KEY", "mage_key");
 
     let result = connect::resolve(&config, true).await.unwrap();
+
+    std::env::remove_var("MAGELAB_API_KEY");
 
     assert_eq!(result.mode, "remote");
     assert_eq!(

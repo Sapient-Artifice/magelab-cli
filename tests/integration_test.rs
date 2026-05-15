@@ -56,6 +56,7 @@ fn test_auth_token_fails_when_not_logged_in() {
 }
 
 #[test]
+#[ignore] // Flaky: depends on real keychain state; use test_login_status_after_logout instead
 fn test_login_status_when_not_logged_in() {
     Command::cargo_bin("mage")
         .unwrap()

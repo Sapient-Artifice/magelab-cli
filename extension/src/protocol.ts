@@ -76,6 +76,49 @@ export interface CancelSubagent {
   task_id: string;
 }
 
+export interface VaultGetResponse {
+  type: "vault_get_response";
+  request_id: string;
+  value?: unknown;
+  error?: unknown;
+}
+
+export interface ShellSessionInput {
+  type: "shell_session_input";
+  session_id: string;
+  chars: string;
+}
+
+export interface McpInstallPermissionResponse {
+  type: "mcp_install_permission_response";
+  approved: boolean;
+  server_name: string;
+  remember?: boolean;
+}
+
+export interface ClipboardResponse {
+  type: "clipboard_response";
+  request_id: string;
+  ok: boolean;
+  text?: string;
+  error?: string;
+}
+
+export interface NotificationResponse {
+  type: "notification_response";
+  request_id: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface ScreenshotResponse {
+  type: "screenshot_response";
+  request_id: string;
+  ok: boolean;
+  path?: string;
+  error?: string;
+}
+
 export interface AssistantStream {
   type: "assistant_stream";
   phase: string;
@@ -243,6 +286,93 @@ export interface Ping {
   type: "ping";
 }
 
+export interface VaultGetPrompt {
+  type: "vault_get_prompt";
+  request_id: string;
+  key: string;
+  reason: string;
+}
+
+export interface SetVoiceResult {
+  type: "set_voice_result";
+  ok?: boolean;
+  voice?: string;
+  error?: string;
+}
+
+export interface TtsAudio {
+  type: "tts_audio";
+  streaming?: boolean;
+  phase?: string;
+  stream_id?: string;
+  mime_type?: string;
+}
+
+export interface ConfirmationResolved {
+  type: "confirmation_resolved";
+  confirmation_id: string;
+  resolution?: string;
+  confirmed?: boolean;
+  remember?: boolean;
+  always_allow?: boolean;
+}
+
+export interface ModelSuggestion {
+  type: "model_suggestion";
+  suggested_model?: string;
+  cost_ratio?: string;
+  context_tokens?: string;
+  suggestion_reason?: string;
+  model_used?: string;
+  rate_limited?: boolean;
+  hourly_spend?: string;
+  hourly_limit?: string;
+}
+
+export interface McpServerStatus {
+  type: "mcp_server_status";
+  server_name: string;
+  status: string;
+  error?: string;
+}
+
+export interface McpInstallPermission {
+  type: "mcp_install_permission";
+  server_name: string;
+}
+
+export interface ClipboardRequest {
+  type: "clipboard_request";
+  request_id: string;
+  action: string;
+  text?: string;
+}
+
+export interface NotificationRequest {
+  type: "notification_request";
+  request_id: string;
+  title: string;
+  message: string;
+}
+
+export interface ScreenshotRequest {
+  type: "screenshot_request";
+  request_id: string;
+  output_path: string;
+  region: string;
+}
+
+export interface ShellSession {
+  type: "shell_session";
+  phase?: string;
+}
+
+export interface ShellSessionInputResult {
+  type: "shell_session_input_result";
+  success?: boolean;
+  error?: string;
+}
+
 export type ClientMessage =
   | TextMessage
   | AudioMessage
@@ -258,7 +388,13 @@ export type ClientMessage =
   | SetChat
   | Control
   | Lifecycle
-  | CancelSubagent;
+  | CancelSubagent
+  | VaultGetResponse
+  | ShellSessionInput
+  | McpInstallPermissionResponse
+  | ClipboardResponse
+  | NotificationResponse
+  | ScreenshotResponse;
 
 export type ServerMessage =
   | AssistantStream
@@ -286,4 +422,16 @@ export type ServerMessage =
   | BindResult
   | BrokerError
   | ErrorMessage
-  | Ping;
+  | Ping
+  | VaultGetPrompt
+  | SetVoiceResult
+  | TtsAudio
+  | ConfirmationResolved
+  | ModelSuggestion
+  | McpServerStatus
+  | McpInstallPermission
+  | ClipboardRequest
+  | NotificationRequest
+  | ScreenshotRequest
+  | ShellSession
+  | ShellSessionInputResult;

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub api_key: Option<String>,
 
     #[serde(default = "default_model")]
@@ -33,10 +33,22 @@ pub struct Config {
 
     #[serde(default)]
     pub default_device: Option<String>,
+
+    /// Enable relay — register headless backend as a device with the gateway
+    #[serde(default)]
+    pub relay_enabled: bool,
+
+    #[serde(default = "default_true")]
+    pub telemetry: Option<bool>,
+
+    #[serde(default)]
+    pub activated_user_id: Option<String>,
 }
 
+pub const DEFAULT_MODEL: &str = "qwen-3-235b-a22b-instruct-2507";
+
 fn default_model() -> String {
-    "qwen-3-235b-a22b-instruct-2507".into()
+    DEFAULT_MODEL.into()
 }
 fn default_gateway_url() -> String {
     "https://api.magelab.ai".into()
@@ -49,6 +61,9 @@ fn default_prefer() -> String {
 }
 fn default_theme() -> String {
     "auto".into()
+}
+fn default_true() -> Option<bool> {
+    Some(true)
 }
 fn default_auto_approve() -> Vec<String> {
     vec![
@@ -70,6 +85,9 @@ impl Default for Config {
             auto_approve: default_auto_approve(),
             theme: default_theme(),
             default_device: None,
+            relay_enabled: false,
+            telemetry: default_true(),
+            activated_user_id: None,
         }
     }
 }
@@ -120,17 +138,20 @@ impl Config {
         Ok(())
     }
 
-    /// Get effective API key: env var takes precedence over config file
+    /// Whether telemetry is enabled (default: true)
+    pub fn telemetry(&self) -> bool {
+        self.telemetry.unwrap_or(true)
+    }
+
+    /// Get API key from MAGELAB_API_KEY env var only.
+    /// The plaintext api_key field in cli.toml is deprecated and ignored.
     pub fn api_key(&self) -> Option<String> {
-        std::env::var("MAGELAB_API_KEY")
-            .ok()
-            .or_else(|| self.api_key.clone())
+        std::env::var("MAGELAB_API_KEY").ok()
     }
 
     /// Set a config value by key name
     pub fn set_value(&mut self, key: &str, value: &str) -> Result<()> {
         match key {
-            "api_key" => self.api_key = Some(value.to_string()),
             "default_model" => self.default_model = value.to_string(),
             "magelab_home" => self.magelab_home = Some(value.to_string()),
             "gateway_url" => self.gateway_url = value.to_string(),
@@ -138,6 +159,20 @@ impl Config {
             "prefer" => self.prefer = value.to_string(),
             "theme" => self.theme = value.to_string(),
             "default_device" => self.default_device = Some(value.to_string()),
+            "relay_enabled" => {
+                self.relay_enabled = match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => anyhow::bail!("relay_enabled must be 'true' or 'false'"),
+                };
+            }
+            "telemetry" => {
+                self.telemetry = Some(match value {
+                    "true" => true,
+                    "false" => false,
+                    _ => anyhow::bail!("telemetry must be 'true' or 'false'"),
+                });
+            }
             _ => anyhow::bail!("Unknown config key: {}", key),
         }
         Ok(())

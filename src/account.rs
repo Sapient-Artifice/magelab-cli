@@ -53,10 +53,15 @@ pub async fn list_keys(client: &RemoteClient) -> Result<()> {
         println!("{:<8} {:<30} {:<10} CREATED", "ID", "KEY", "STATUS");
         println!("{}", "─".repeat(65));
         for key in keys {
-            let id = key["id"]
-                .as_str()
-                .or(key["id"].as_i64().map(|_| ""))
-                .unwrap_or("?");
+            let id_str;
+            let id = if let Some(s) = key["id"].as_str() {
+                s
+            } else if let Some(n) = key["id"].as_i64() {
+                id_str = n.to_string();
+                &id_str
+            } else {
+                "?"
+            };
             let val = key["key_preview"].as_str().unwrap_or("***");
             let revoked = key["is_revoked"].as_bool().unwrap_or(false);
             let status = if revoked { "revoked" } else { "active" };
@@ -67,13 +72,15 @@ pub async fn list_keys(client: &RemoteClient) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_key(client: &RemoteClient) -> Result<()> {
+pub async fn create_key(client: &RemoteClient) -> Result<Option<String>> {
     let resp = client.generate_key().await?;
     if let Some(key) = resp["api_key"].as_str() {
         println!("New API key: {}", key);
         println!("Save this — it won't be shown again.");
+        Ok(Some(key.to_string()))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 pub async fn revoke_key(client: &RemoteClient, key_id: &str) -> Result<()> {

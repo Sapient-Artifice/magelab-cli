@@ -1,4 +1,5 @@
 pub mod account;
+pub mod analytics;
 pub mod auth;
 pub mod client;
 pub mod config;

@@ -22,7 +22,13 @@
         { "$ref": "#/$defs/SetChat" },
         { "$ref": "#/$defs/Control" },
         { "$ref": "#/$defs/Lifecycle" },
-        { "$ref": "#/$defs/CancelSubagent" }
+        { "$ref": "#/$defs/CancelSubagent" },
+        { "$ref": "#/$defs/VaultGetResponse" },
+        { "$ref": "#/$defs/ShellSessionInput" },
+        { "$ref": "#/$defs/McpInstallPermissionResponse" },
+        { "$ref": "#/$defs/ClipboardResponse" },
+        { "$ref": "#/$defs/NotificationResponse" },
+        { "$ref": "#/$defs/ScreenshotResponse" }
       ]
     },
 
@@ -54,7 +60,19 @@
         { "$ref": "#/$defs/BindResult" },
         { "$ref": "#/$defs/BrokerError" },
         { "$ref": "#/$defs/ErrorMessage" },
-        { "$ref": "#/$defs/Ping" }
+        { "$ref": "#/$defs/Ping" },
+        { "$ref": "#/$defs/VaultGetPrompt" },
+        { "$ref": "#/$defs/SetVoiceResult" },
+        { "$ref": "#/$defs/TtsAudio" },
+        { "$ref": "#/$defs/ConfirmationResolved" },
+        { "$ref": "#/$defs/ModelSuggestion" },
+        { "$ref": "#/$defs/McpServerStatus" },
+        { "$ref": "#/$defs/McpInstallPermission" },
+        { "$ref": "#/$defs/ClipboardRequest" },
+        { "$ref": "#/$defs/NotificationRequest" },
+        { "$ref": "#/$defs/ScreenshotRequest" },
+        { "$ref": "#/$defs/ShellSession" },
+        { "$ref": "#/$defs/ShellSessionInputResult" }
       ]
     },
 
@@ -518,6 +536,230 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "ping" }
+      },
+      "additionalProperties": false
+    },
+
+    "VaultGetPrompt": {
+      "description": "Backend asks the client to retrieve a secret from the Stronghold vault",
+      "type": "object",
+      "required": ["type", "request_id", "key", "reason"],
+      "properties": {
+        "type": { "const": "vault_get_prompt" },
+        "request_id": { "type": "string" },
+        "key": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "VaultGetResponse": {
+      "description": "Client responds with the vault secret. value=null + no error means key not found. error set means vault access failed.",
+      "type": "object",
+      "required": ["type", "request_id"],
+      "properties": {
+        "type": { "const": "vault_get_response" },
+        "request_id": { "type": "string" },
+        "value": { "type": ["string", "null"] },
+        "error": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "ShellSessionInput": {
+      "type": "object",
+      "required": ["type", "session_id", "chars"],
+      "properties": {
+        "type": { "const": "shell_session_input" },
+        "session_id": { "type": "string" },
+        "chars": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "McpInstallPermissionResponse": {
+      "type": "object",
+      "required": ["type", "approved", "server_name"],
+      "properties": {
+        "type": { "const": "mcp_install_permission_response" },
+        "approved": { "type": "boolean" },
+        "server_name": { "type": "string" },
+        "remember": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "ClipboardResponse": {
+      "type": "object",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "type": { "const": "clipboard_response" },
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "text": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "NotificationResponse": {
+      "type": "object",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "type": { "const": "notification_response" },
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ScreenshotResponse": {
+      "type": "object",
+      "required": ["type", "request_id", "ok"],
+      "properties": {
+        "type": { "const": "screenshot_response" },
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "path": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "SetVoiceResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "set_voice_result" },
+        "ok": { "type": "boolean" },
+        "voice": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "TtsAudio": {
+      "description": "Text-to-speech audio metadata. Actual audio chunks may be sent as binary frames with MLTTS001 magic header.",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "tts_audio" },
+        "streaming": { "type": "boolean" },
+        "phase": { "type": "string", "enum": ["start", "chunk", "end"] },
+        "stream_id": { "type": "string" },
+        "mime_type": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "ConfirmationResolved": {
+      "type": "object",
+      "required": ["type", "confirmation_id"],
+      "properties": {
+        "type": { "const": "confirmation_resolved" },
+        "confirmation_id": { "type": "string" },
+        "resolution": { "type": "string" },
+        "confirmed": { "type": "boolean" },
+        "remember": { "type": "boolean" },
+        "always_allow": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+
+    "ModelSuggestion": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "model_suggestion" },
+        "suggested_model": { "type": "string" },
+        "cost_ratio": { "type": "string" },
+        "context_tokens": { "type": "string" },
+        "suggestion_reason": { "type": "string" },
+        "model_used": { "type": "string" },
+        "rate_limited": { "type": "boolean" },
+        "hourly_spend": { "type": "string" },
+        "hourly_limit": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "McpServerStatus": {
+      "type": "object",
+      "required": ["type", "server_name", "status"],
+      "properties": {
+        "type": { "const": "mcp_server_status" },
+        "server_name": { "type": "string" },
+        "status": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "McpInstallPermission": {
+      "type": "object",
+      "required": ["type", "server_name"],
+      "properties": {
+        "type": { "const": "mcp_install_permission" },
+        "server_name": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ClipboardRequest": {
+      "type": "object",
+      "required": ["type", "request_id", "action"],
+      "properties": {
+        "type": { "const": "clipboard_request" },
+        "request_id": { "type": "string" },
+        "action": { "type": "string", "enum": ["read", "write"] },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "NotificationRequest": {
+      "type": "object",
+      "required": ["type", "request_id", "title", "message"],
+      "properties": {
+        "type": { "const": "notification_request" },
+        "request_id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ScreenshotRequest": {
+      "type": "object",
+      "required": ["type", "request_id", "output_path", "region"],
+      "properties": {
+        "type": { "const": "screenshot_request" },
+        "request_id": { "type": "string" },
+        "output_path": { "type": "string" },
+        "region": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "ShellSession": {
+      "description": "Shell session lifecycle and output events",
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "shell_session" },
+        "phase": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+
+    "ShellSessionInputResult": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "shell_session_input_result" },
+        "success": { "type": "boolean" },
+        "error": { "type": "string" }
       },
       "additionalProperties": false
     }
