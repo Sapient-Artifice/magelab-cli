@@ -1,4 +1,11 @@
-name: CI
+name: CI — Monorepo Notice
+
+# This crate is a workspace member of Sapient-Artifice/magelab.
+# CI (build, test, clippy, fmt) runs from the monorepo workflow:
+#   .github/workflows/rust.yml
+#
+# This stub exists so PRs against the standalone repo show a status check
+# rather than silently having no CI.
 
 on:
   push:
@@ -6,72 +13,11 @@ on:
   pull_request:
 
 jobs:
-  check:
-    name: Check
+  notice:
+    name: Workspace build notice
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Sapient-Artifice/magelab
-          ref: main
-      - name: Overlay CLI source
-        uses: actions/checkout@v4
-        with:
-          path: magelab-cli
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p magelab-cli
-
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Sapient-Artifice/magelab
-          ref: main
-      - name: Overlay CLI source
-        uses: actions/checkout@v4
-        with:
-          path: magelab-cli
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p magelab-cli
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Sapient-Artifice/magelab
-          ref: main
-      - name: Overlay CLI source
-        uses: actions/checkout@v4
-        with:
-          path: magelab-cli
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p magelab-cli -- -D warnings
-
-  fmt:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Sapient-Artifice/magelab
-          ref: main
-      - name: Overlay CLI source
-        uses: actions/checkout@v4
-        with:
-          path: magelab-cli
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt -p magelab-cli --check
+      - run: |
+          echo "magelab-cli is a workspace member of Sapient-Artifice/magelab."
+          echo "Full CI (build, test, clippy, fmt) runs from the monorepo."
+          echo "See: https://github.com/Sapient-Artifice/magelab/actions/workflows/rust.yml"
