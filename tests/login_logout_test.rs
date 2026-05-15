@@ -4,7 +4,7 @@
 //! by standing up a wiremock server that mimics the gateway's /v1/auth endpoints.
 
 use assert_cmd::Command;
-use magelab_cli::auth::credentials::Credentials;
+use magelab_cli::auth::Credentials;
 use magelab_cli::auth::oauth;
 use predicates::prelude::*;
 use wiremock::matchers::{body_string_contains, method, path};
@@ -109,7 +109,7 @@ fn test_credentials_save_load_roundtrip() {
     let creds = Credentials {
         access_token: Some("tok_roundtrip".into()),
         refresh_token: Some("ref_roundtrip".into()),
-        expires_at: Some(chrono::Utc::now().timestamp() + 3600),
+        expires_at: Some(9999999999),
         user_id: Some("user_rt".into()),
         email: Some("test@example.com".into()),
     };
@@ -140,7 +140,7 @@ fn test_expired_credentials_are_invalid() {
     };
 
     assert!(!creds.is_token_valid());
-    assert!(creds.has_token());
+    assert!(creds.access_token.is_some());
 }
 
 /// Logout via CLI should succeed even when not logged in.

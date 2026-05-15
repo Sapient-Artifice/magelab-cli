@@ -23,7 +23,7 @@ fn test_login_method_default_is_web() {
 #[test]
 fn test_credentials_email_field() {
     let json = r#"{"access_token":"tok","email":"max@magelab.ai"}"#;
-    let creds: magelab_cli::auth::credentials::Credentials = serde_json::from_str(json).unwrap();
+    let creds: magelab_cli::auth::Credentials = serde_json::from_str(json).unwrap();
     assert_eq!(creds.email.as_deref(), Some("max@magelab.ai"));
     assert_eq!(creds.access_token.as_deref(), Some("tok"));
 }
@@ -31,7 +31,7 @@ fn test_credentials_email_field() {
 #[test]
 fn test_credentials_backwards_compatible() {
     let json = r#"{"access_token":"tok","refresh_token":"ref","expires_at":999999999}"#;
-    let creds: magelab_cli::auth::credentials::Credentials = serde_json::from_str(json).unwrap();
+    let creds: magelab_cli::auth::Credentials = serde_json::from_str(json).unwrap();
     assert!(creds.email.is_none());
-    assert!(creds.has_token());
+    assert!(creds.access_token.is_some());
 }

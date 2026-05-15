@@ -41,7 +41,7 @@ pub async fn cmd_vault(config: &mut Config, action: VaultAction) -> Result<()> {
         }
         VaultAction::Get { key } => {
             auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
-            if let Ok(creds) = auth::credentials::Credentials::load() {
+            if let Ok(creds) = auth::Credentials::load() {
                 if let Some(uid) = &creds.user_id {
                     analytics::track_activation(uid, "vault_get", config).await;
                 }

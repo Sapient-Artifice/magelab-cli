@@ -68,7 +68,7 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     }
 
     // 3. Check for JWT → try relay
-    let creds = auth::credentials::Credentials::load().unwrap_or_default();
+    let creds = auth::Credentials::load().unwrap_or_default();
     if let Some(jwt) = get_valid_jwt(&creds, &config.gateway_url).await {
         if let Ok(devices) = detect::discover_devices(&config.gateway_url, &jwt).await {
             // Use bound device if configured, otherwise any online device
@@ -118,10 +118,10 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
     })
 }
 
-/// Try to get a valid JWT, refreshing if expired
+/// Try to get a valid JWT, refreshing if expired (with biometric fallback)
 async fn get_valid_jwt(
-    creds: &auth::credentials::Credentials,
+    creds: &auth::Credentials,
     gateway_url: &str,
 ) -> Option<String> {
-    creds.try_get_valid_jwt(gateway_url).await
+    auth::get_valid_jwt(creds, gateway_url).await
 }
