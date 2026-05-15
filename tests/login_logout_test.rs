@@ -146,9 +146,13 @@ fn test_expired_credentials_are_invalid() {
 /// Logout via CLI should succeed even when not logged in.
 #[test]
 fn test_logout_succeeds_when_not_logged_in() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
+        .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success()
         .stdout(predicate::str::contains("Logged out"));
@@ -157,16 +161,21 @@ fn test_logout_succeeds_when_not_logged_in() {
 /// Login --status after logout should show "Not logged in".
 #[test]
 fn test_login_status_after_logout() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        return;
+    }
     // Logout first to ensure clean state
     Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
+        .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
     Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
+        .timeout(std::time::Duration::from_secs(10))
         .env_remove("MAGELAB_API_KEY")
         .assert()
         .success()
@@ -176,9 +185,13 @@ fn test_login_status_after_logout() {
 /// Login --status shows API key preview when MAGELAB_API_KEY is set.
 #[test]
 fn test_login_status_shows_api_key() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
+        .timeout(std::time::Duration::from_secs(10))
         .env("MAGELAB_API_KEY", "sk-test-1234567890abcdef")
         .assert()
         .success()

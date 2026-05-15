@@ -150,6 +150,9 @@ mod credential_integration_tests {
 
     #[test]
     fn save_with_touchid_disabled_preserves_refresh_token_in_regular_store() {
+        if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+            return;
+        }
         touchid::set_disabled(true);
 
         let creds = Credentials {
