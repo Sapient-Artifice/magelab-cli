@@ -49,6 +49,10 @@ fn test_config_shows_path() {
 
 #[test]
 fn test_auth_token_fails_when_not_logged_in() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        eprintln!("Skipping: keychain access may hang in CI");
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .args(["auth", "token"])
@@ -72,6 +76,10 @@ fn test_login_status_when_not_logged_in() {
 
 #[test]
 fn test_models_without_auth_fails() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        eprintln!("Skipping: keychain access may hang in CI");
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .arg("models")

@@ -7,6 +7,7 @@ mod connect;
 mod detect;
 mod settings;
 mod ui;
+mod vault;
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
@@ -174,6 +175,15 @@ enum VaultAction {
     Push,
 }
 
+impl VaultAction {
+    fn into_vault_action(self) -> vault::VaultAction {
+        match self {
+            VaultAction::Get { key } => vault::VaultAction::Get { key },
+            VaultAction::Push => vault::VaultAction::Push,
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -255,7 +265,13 @@ async fn main() -> Result<()> {
             }
             cmd_keys(&config, action).await
         }
-        Commands::Vault { action } => cmd_vault(&mut config, action).await,
+        Commands::Vault { action } => {
+            let va = match action {
+                Some(a) => a.into_vault_action(),
+                None => vault::VaultAction::List,
+            };
+            vault::cmd_vault(&mut config, va).await
+        }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
         Commands::Completions { shell } => {
@@ -456,7 +472,7 @@ async fn cmd_launch(config: &mut Config, wait: bool) -> Result<()> {
         if let Ok(v) = magelab_core::vault::Vault::open() {
             if let Ok(secrets) = v.all_secrets() {
                 if !secrets.is_empty() {
-                    if let Err(e) = push_vault_secrets(config).await {
+                    if let Err(e) = vault::push_secrets(config).await {
                         eprintln!("Warning: vault push failed: {e}");
                     }
                 }
@@ -592,82 +608,6 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
             Ok(())
         }
         KeysAction::Revoke { id } => account::revoke_key(&client, &id).await,
-    }
-}
-
-async fn cmd_vault(config: &mut Config, action: Option<VaultAction>) -> Result<()> {
-    match action {
-        None => {
-            // mage vault — list key names
-            auth::touchid::verify(auth::touchid::Tier::Cached, "list vault keys")?;
-            let vault = magelab_core::vault::Vault::open().map_err(|e| match e {
-                magelab_core::vault::VaultError::NotFound(_) => {
-                    anyhow::anyhow!("No vault found. Open the desktop app to create one.")
-                }
-                magelab_core::vault::VaultError::KeychainUnavailable(_) => anyhow::anyhow!(
-                    "Vault exists but no password in keychain. Open the desktop app first, or set MAGELAB_VAULT_PASSWORD env var."
-                ),
-                other => anyhow::anyhow!("{other}"),
-            })?;
-
-            let keys = vault.list()?;
-            if keys.is_empty() {
-                println!("Vault is empty. Store secrets in the desktop app.");
-            } else {
-                for key in &keys {
-                    println!("{}", key);
-                }
-            }
-            Ok(())
-        }
-        Some(VaultAction::Get { key }) => {
-            auth::touchid::verify(auth::touchid::Tier::Sensitive, "read vault secret")?;
-            if let Ok(creds) = auth::credentials::Credentials::load() {
-                if let Some(uid) = &creds.user_id {
-                    analytics::track_activation(uid, "vault_get", config).await;
-                }
-            }
-            let vault = magelab_core::vault::Vault::open()?;
-            match vault.get(&key)? {
-                Some(value) => {
-                    print!("{}", value); // No newline — for piping
-                    Ok(())
-                }
-                None => anyhow::bail!("Key '{}' not found in vault", key),
-            }
-        }
-        Some(VaultAction::Push) => {
-            auth::touchid::verify(auth::touchid::Tier::Sensitive, "push vault secrets")?;
-            push_vault_secrets(config).await
-        }
-    }
-}
-
-async fn push_vault_secrets(config: &Config) -> Result<()> {
-    let vault = magelab_core::vault::Vault::open()?;
-    let secrets = vault.all_secrets()?;
-
-    if secrets.is_empty() {
-        println!("No secrets in vault to push.");
-        return Ok(());
-    }
-
-    let url = format!("{}/api/auth/push_secrets", config.local_url);
-    let body = serde_json::json!({ "secrets": secrets });
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|_| anyhow::anyhow!("Backend not running. Start it with `mage launch`"))?;
-
-    if resp.status().is_success() {
-        ui::success(&format!("Pushed {} secret(s) to backend", secrets.len()));
-        Ok(())
-    } else {
-        anyhow::bail!("Push failed with status {}", resp.status())
     }
 }
 

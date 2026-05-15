@@ -7,3 +7,4 @@ pub mod connect;
 pub mod detect;
 pub mod settings;
 pub mod ui;
+pub mod vault;
