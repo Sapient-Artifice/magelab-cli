@@ -6,5 +6,6 @@ pub mod config;
 pub mod connect;
 pub mod detect;
 pub mod settings;
+pub mod setup_pi;
 pub mod ui;
 pub mod vault;

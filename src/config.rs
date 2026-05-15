@@ -43,6 +43,11 @@ pub struct Config {
 
     #[serde(default)]
     pub activated_user_id: Option<String>,
+
+    /// Override path for save(). When set, save() writes here instead of the default.
+    /// Not serialized — only used at runtime.
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
 }
 
 pub const DEFAULT_MODEL: &str = "qwen-3-235b-a22b-instruct-2507";
@@ -88,6 +93,7 @@ impl Default for Config {
             relay_enabled: false,
             telemetry: default_true(),
             activated_user_id: None,
+            config_path: None,
         }
     }
 }
@@ -123,10 +129,25 @@ impl Config {
         Ok(config)
     }
 
-    /// Save config to default path
+    /// Save config to default path, or config_path if set
     pub fn save(&self) -> Result<()> {
-        let path = Self::path()?;
+        let path = match &self.config_path {
+            Some(p) => p.clone(),
+            None => Self::path()?,
+        };
         self.save_to(&path)
+    }
+
+    /// Load from a specific path and remember it for subsequent save() calls.
+    #[allow(dead_code)]
+    pub fn load_with_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let mut config = if path.as_ref().exists() {
+            Self::load_from(&path)?
+        } else {
+            Self::default()
+        };
+        config.config_path = Some(path.as_ref().to_path_buf());
+        Ok(config)
     }
 
     /// Save config to a specific path

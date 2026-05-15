@@ -138,7 +138,9 @@ impl Credentials {
             if let Ok(Some(bio_refresh)) = touchid::load_secure() {
                 if let Ok(new_creds) = super::oauth::refresh_token(gateway_url, &bio_refresh).await
                 {
-                    let _ = new_creds.save();
+                    if let Err(e) = new_creds.save() {
+                        eprintln!("[credentials] failed to save refreshed credentials: {e}");
+                    }
                     if let Some(t) = new_creds.access_token {
                         return Some(t);
                     }
@@ -148,7 +150,9 @@ impl Credentials {
             // Fall back to regular refresh token
             if let Some(refresh) = &self.refresh_token {
                 if let Ok(new_creds) = super::oauth::refresh_token(gateway_url, refresh).await {
-                    let _ = new_creds.save();
+                    if let Err(e) = new_creds.save() {
+                        eprintln!("[credentials] failed to save refreshed credentials: {e}");
+                    }
                     return new_creds.access_token;
                 }
             }
