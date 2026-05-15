@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use rand::Rng;
-use sha2::{Digest, Sha256};
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::TcpListener;
 use std::str::FromStr;
 
-use super::credentials::Credentials;
+use magelab_core::auth::{self as core_auth, pkce, Credentials};
+
+// Re-export core auth functions for the public API (used by integration tests)
+#[allow(unused_imports)]
+pub use magelab_core::auth::exchange_cli_code;
+#[allow(unused_imports)]
+pub use magelab_core::auth::refresh_token;
 
 /// WorkOS authorize endpoint
 const WORKOS_AUTHORIZE_URL: &str = "https://api.workos.com/user_management/authorize";
@@ -136,7 +138,7 @@ async fn login_web() -> Result<Credentials> {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
         .context("Failed to start loopback server on port 19872 — is another instance running?")?;
 
-    let state = generate_state();
+    let state = pkce::generate_state();
     let loopback_url = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
     let base = web_url();
 
@@ -163,10 +165,20 @@ async fn login_web() -> Result<Credentials> {
     // AES-256-GCM with a key derived from (server_secret + state). If the
     // state is wrong, decryption fails in the POST exchange below.
     let sp = crate::ui::spinner("Exchanging code...");
-    let creds = exchange_cli_code(&base, &code, &state).await?;
+    let creds = core_auth::exchange_cli_code(&base, &code, &state)
+        .await
+        .map_err(|e| {
+            if let core_auth::AuthError::TokenExchange { status: 410, .. } = &e {
+                anyhow::anyhow!(
+                    "Login code expired — the 60-second window elapsed. Please try again."
+                )
+            } else {
+                anyhow::anyhow!("{e}")
+            }
+        })?;
     sp.finish_and_clear();
 
-    creds.save()?;
+    super::save_credentials(&creds)?;
     if let Some(ref email) = creds.email {
         crate::ui::success(&format!("Logged in as {email}"));
     }
@@ -232,53 +244,6 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     Ok(code)
 }
 
-/// Exchange an encrypted CLI code for credentials via POST to the web app.
-pub async fn exchange_cli_code(web_base: &str, code: &str, state: &str) -> Result<Credentials> {
-    let http = reqwest::Client::new();
-    let url = format!("{}/api/auth/cli-token", web_base);
-
-    let resp = http
-        .post(&url)
-        .json(&serde_json::json!({ "code": code, "state": state }))
-        .send()
-        .await
-        .context("Failed to exchange code with web app")?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        if status.as_u16() == 410 {
-            anyhow::bail!("Login code expired — the 60-second window elapsed. Please try again.");
-        }
-        anyhow::bail!("Code exchange failed ({}): {}", status, body);
-    }
-
-    let data: serde_json::Value = resp
-        .json()
-        .await
-        .context("Failed to parse code exchange response")?;
-
-    let access_token = data["access_token"]
-        .as_str()
-        .context("No access_token in response")?
-        .to_string();
-
-    let email = data["email"].as_str().map(String::from);
-    let user_id = data["user_id"].as_str().map(String::from);
-
-    // Server includes expires_in from JWT exp claim when available
-    let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-
-    Ok(Credentials {
-        access_token: Some(access_token),
-        refresh_token: None,
-        expires_at: Some(expires_at),
-        user_id,
-        email,
-    })
-}
-
 /// Magic Auth login flow — exchanges code through the gateway
 async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     let http = reqwest::Client::new();
@@ -341,7 +306,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     }
 
     let sp = crate::ui::spinner("Authenticating...");
-    let creds = exchange_token(
+    let creds = core_auth::exchange_token(
         gateway_url,
         &serde_json::json!({
             "grant_type": "urn:workos:oauth:grant-type:magic-auth",
@@ -353,7 +318,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     .await?;
     sp.finish_and_clear();
 
-    creds.save()?;
+    super::save_credentials(&creds)?;
     if let Some(ref email) = creds.email {
         crate::ui::success(&format!("Logged in as {email}"));
     }
@@ -364,9 +329,9 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
 /// Google OAuth login flow — builds auth URL locally, exchanges code through gateway
 async fn login_google(gateway_url: &str) -> Result<Credentials> {
     let cid_str = client_id();
-    let verifier = generate_code_verifier();
-    let challenge = generate_code_challenge(&verifier);
-    let state = generate_state();
+    let verifier = pkce::generate_code_verifier();
+    let challenge = pkce::generate_code_challenge(&verifier);
+    let state = pkce::generate_state();
 
     let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
         .context("Failed to start loopback server on port 19872 — is another instance running?")?;
@@ -393,7 +358,7 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
     }
 
     let sp = crate::ui::spinner("Exchanging authorization code...");
-    let creds = exchange_token(
+    let creds = core_auth::exchange_token(
         gateway_url,
         &serde_json::json!({
             "grant_type": "authorization_code",
@@ -406,74 +371,12 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
     .await?;
     sp.finish_and_clear();
 
-    creds.save()?;
+    super::save_credentials(&creds)?;
     if let Some(ref email) = creds.email {
         crate::ui::success(&format!("Logged in as {email}"));
     }
     crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
-}
-
-/// Exchange a grant (auth code, refresh token, magic auth) for credentials
-/// via the gateway's /v1/auth/token endpoint.
-async fn exchange_token(gateway_url: &str, body: &serde_json::Value) -> Result<Credentials> {
-    let http = reqwest::Client::new();
-    let url = format!("{}/token", auth_base_url(gateway_url));
-
-    let resp = http
-        .post(&url)
-        .json(body)
-        .send()
-        .await
-        .context("Failed to connect to gateway for token exchange")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Token exchange failed ({}): {}", status, body);
-    }
-
-    let data: serde_json::Value = resp
-        .json()
-        .await
-        .context("Failed to parse token response")?;
-
-    let access_token = data["access_token"]
-        .as_str()
-        .context("No access_token in response")?
-        .to_string();
-
-    let refresh_token = data["refresh_token"].as_str().map(String::from);
-    let email = data["user"]["email"].as_str().map(String::from);
-    let user_id = data["user"]["id"].as_str().map(String::from);
-
-    let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
-    let expires_at = chrono::Utc::now().timestamp() + expires_in;
-
-    Ok(Credentials {
-        access_token: Some(access_token),
-        refresh_token,
-        expires_at: Some(expires_at),
-        user_id,
-        email,
-    })
-}
-
-fn generate_code_verifier() -> String {
-    let mut rng = rand::rngs::OsRng;
-    let bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn generate_code_challenge(verifier: &str) -> String {
-    let hash = Sha256::digest(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(hash)
-}
-
-fn generate_state() -> String {
-    let mut rng = rand::rngs::OsRng;
-    let bytes: Vec<u8> = (0..16).map(|_| rng.gen::<u8>()).collect();
-    URL_SAFE_NO_PAD.encode(bytes)
 }
 
 fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
@@ -535,19 +438,4 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
-}
-
-/// Refresh an expired access token via the gateway
-pub async fn refresh_token(gateway_url: &str, rt: &str) -> Result<Credentials> {
-    let creds = exchange_token(
-        gateway_url,
-        &serde_json::json!({
-            "grant_type": "refresh_token",
-            "refresh_token": rt,
-            "client_id": client_id(),
-        }),
-    )
-    .await?;
-    creds.save()?;
-    Ok(creds)
 }

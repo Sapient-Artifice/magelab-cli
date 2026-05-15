@@ -35,17 +35,19 @@ fn test_activation_fires_for_different_user() {
 }
 
 #[tokio::test]
-async fn test_track_activation_persists_user_id() {
+async fn test_track_activation_does_not_persist_on_capture_failure() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("cli.toml");
-    let mut config = magelab_cli::config::Config::default();
-    config.save_to(&path).unwrap();
+    let mut config = magelab_cli::config::Config::load_with_path(&path).unwrap();
 
-    // PostHog client not initialized — capture will silently fail, but
-    // activated_user_id should still be persisted
+    // PostHog not initialized — capture will fail, activation should NOT persist
     magelab_cli::analytics::track_activation("user-42", "models", &mut config).await;
 
-    assert_eq!(config.activated_user_id.as_deref(), Some("user-42"));
+    assert_eq!(config.activated_user_id, None);
+
+    // Config file should not contain activated_user_id either
+    let reloaded = magelab_cli::config::Config::load_with_path(&path).unwrap();
+    assert_eq!(reloaded.activated_user_id, None);
 }
 
 #[tokio::test]
@@ -58,6 +60,19 @@ async fn test_track_activation_is_idempotent() {
 
     // Still the same user
     assert_eq!(config.activated_user_id.as_deref(), Some("user-42"));
+}
+
+#[test]
+fn test_config_save_uses_config_path() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("cli.toml");
+    let mut config = magelab_cli::config::Config::load_with_path(&path).unwrap();
+    config.default_model = "test-model".to_string();
+    config.save().unwrap();
+
+    // Verify it wrote to the temp path, not the default
+    let reloaded = magelab_cli::config::Config::load_with_path(&path).unwrap();
+    assert_eq!(reloaded.default_model, "test-model");
 }
 
 #[test]

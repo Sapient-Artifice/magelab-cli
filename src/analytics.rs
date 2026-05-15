@@ -21,10 +21,16 @@ pub async fn init() {
     let _ = posthog_rs::init_global((POSTHOG_API_KEY, POSTHOG_HOST)).await;
 }
 
-/// Send an analytics event. Fails silently — never blocks the CLI.
-pub async fn track(event_name: &str, user_id: &str, extra_properties: Value, config: &Config) {
+/// Send an analytics event. Returns true if capture succeeded.
+/// Never panics or blocks the CLI beyond the timeout.
+pub async fn track(
+    event_name: &str,
+    user_id: &str,
+    extra_properties: Value,
+    config: &Config,
+) -> bool {
     if !config.telemetry() {
-        return;
+        return false;
     }
 
     let mut event = posthog_rs::Event::new(event_name, user_id);
@@ -43,8 +49,17 @@ pub async fn track(event_name: &str, user_id: &str, extra_properties: Value, con
         }
     }
 
-    // Fire with timeout — swallow all errors
-    let _ = tokio::time::timeout(CAPTURE_TIMEOUT, posthog_rs::capture(event)).await;
+    match tokio::time::timeout(CAPTURE_TIMEOUT, posthog_rs::capture(event)).await {
+        Ok(Ok(_)) => true,
+        Ok(Err(e)) => {
+            eprintln!("[analytics] capture failed: {e}");
+            false
+        }
+        Err(_) => {
+            eprintln!("[analytics] capture timed out");
+            false
+        }
+    }
 }
 
 /// Check if activation should fire for this user (pure logic, testable without PostHog).
@@ -53,20 +68,38 @@ pub fn should_track_activation(user_id: &str, config: &Config) -> bool {
 }
 
 /// Track activation if this user hasn't been activated yet.
+/// Only persists activation state if PostHog capture succeeds.
 pub async fn track_activation(user_id: &str, command: &str, config: &mut Config) {
     if !should_track_activation(user_id, config) {
         return;
     }
 
-    track(
+    if !track(
         "cli_activated",
         user_id,
         json!({ "command": command }),
         config,
     )
-    .await;
+    .await
+    {
+        return; // don't persist — we'll retry next run
+    }
 
-    // Persist activation
     config.activated_user_id = Some(user_id.to_string());
-    let _ = config.save();
+    if let Err(e) = config.save() {
+        eprintln!("[config] failed to save activation state: {e}");
+    }
+}
+
+/// Report a CLI error to PostHog. Best-effort, never blocks.
+/// No-op when telemetry is disabled or PostHog is uninitialized.
+#[allow(dead_code)]
+pub async fn report_error(error_type: &str, message: &str, config: &Config) {
+    track(
+        "cli_error",
+        "anonymous",
+        json!({ "error_type": error_type, "message": message }),
+        config,
+    )
+    .await;
 }

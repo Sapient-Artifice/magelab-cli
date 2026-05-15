@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use std::time::Duration;
 
 #[test]
 fn no_touchid_flag_accepted_by_version() {
@@ -12,9 +13,13 @@ fn no_touchid_flag_accepted_by_version() {
 
 #[test]
 fn no_touchid_flag_accepted_by_status() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "status"])
+        .timeout(Duration::from_secs(10))
         .assert()
         .success();
 }
@@ -30,9 +35,13 @@ fn no_touchid_flag_accepted_by_config() {
 
 #[test]
 fn no_touchid_flag_accepted_by_login_status() {
+    if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
+        return;
+    }
     Command::cargo_bin("mage")
         .unwrap()
         .args(["--no-touchid", "login", "--status"])
+        .timeout(Duration::from_secs(10))
         .assert()
         .success();
 }
