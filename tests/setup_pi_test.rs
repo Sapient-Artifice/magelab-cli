@@ -91,6 +91,7 @@ fn test_setup_pi_uninstall_when_not_installed() {
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore)] // dirs::home_dir() doesn't respect USERPROFILE overrides reliably
 fn test_setup_pi_uninstall_removes_directory() {
     let tmp = TempDir::new().unwrap();
     let ext_dir = tmp.path().join(".pi/agent/extensions/magelab-agent/src");
