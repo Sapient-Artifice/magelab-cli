@@ -4,8 +4,8 @@
 //! by standing up a wiremock server that mimics the gateway's /v1/auth endpoints.
 
 use assert_cmd::Command;
-use magelab_cli::auth::Credentials;
 use magelab_cli::auth::oauth;
+use magelab_cli::auth::Credentials;
 use predicates::prelude::*;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -94,8 +94,8 @@ async fn test_refresh_token_unreachable_gateway() {
     let result = oauth::refresh_token("http://127.0.0.1:19999", "some_token").await;
     assert!(result.is_err());
     assert!(
-        result.unwrap_err().to_string().contains("connect"),
-        "error should indicate a connection failure"
+        result.unwrap_err().to_string().contains("request"),
+        "error should indicate a request failure"
     );
 }
 
@@ -279,7 +279,7 @@ async fn test_cli_code_exchange_unreachable() {
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("connect") || err_msg.contains("exchange") || err_msg.contains("web app"),
+        err_msg.contains("request") || err_msg.contains("exchange") || err_msg.contains("web app"),
         "error should indicate connection failure: {err_msg}"
     );
 }

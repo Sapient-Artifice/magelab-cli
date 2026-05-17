@@ -40,6 +40,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: magelab-cli
+
+      - name: Use Rustls for release TLS
+        shell: pwsh
+        run: |
+          $path = "Cargo.toml"
+          $content = Get-Content $path -Raw
+          $content = $content -replace 'reqwest = \{ version = "0\.12", features = \["json", "stream", "native-tls"\] \}', 'reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }'
+          if ($content -notmatch 'reqwest = \{ version = "0\.12", default-features = false, features = \["json", "stream", "rustls-tls"\] \}') {
+            throw "Failed to switch workspace reqwest dependency to Rustls"
+          }
+          Set-Content -Path $path -Value $content -NoNewline
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
