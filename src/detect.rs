@@ -96,15 +96,36 @@ pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
         }
     }
 
-    // 3. Sibling directory relative to CLI binary
+    // 3. Sibling directory relative to CLI binary (multiple depths for dev layouts)
     if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("mage-lab"));
-        if let Some(path) = sibling {
-            if path.join("backend").join("main.py").exists() {
-                return Some(path);
+        // Try 2, 3, and 4 levels up to handle:
+        //   - cargo install: ~/.cargo/bin/mage (2 up = ~, look for ~/mage-lab)
+        //   - cargo run from repo: magelab-cli/target/debug/mage (3 up = parent of magelab-cli)
+        //   - monorepo cargo run: monorepo/magelab-cli/target/debug/mage (4 up = monorepo parent)
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        for _ in 0..4 {
+            dir = dir.and_then(|d| d.parent().map(|p| p.to_path_buf()));
+            if let Some(ref d) = dir {
+                let candidate = d.join("mage-lab");
+                if candidate.join("backend").join("main.py").exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    // 3b. Sibling directory relative to current working directory
+    //     Handles: user is in magelab-cli/ and ../mage-lab/ exists
+    if let Ok(cwd) = std::env::current_dir() {
+        // Check cwd itself (if user is inside mage-lab/)
+        if cwd.join("backend").join("main.py").exists() {
+            return Some(cwd);
+        }
+        // Check sibling: ../mage-lab/
+        if let Some(parent) = cwd.parent() {
+            let sibling = parent.join("mage-lab");
+            if sibling.join("backend").join("main.py").exists() {
+                return Some(sibling);
             }
         }
     }
