@@ -145,7 +145,7 @@ mod refresh_path_tests {
 }
 
 mod credential_integration_tests {
-    use magelab_cli::auth::credentials::Credentials;
+    use magelab_cli::auth::Credentials;
     use magelab_cli::auth::touchid;
 
     #[test]

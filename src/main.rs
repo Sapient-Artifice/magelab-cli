@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
         }
         Commands::Models => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access account info")?;
-            if let Ok(creds) = auth::credentials::Credentials::load() {
+            if let Ok(creds) = auth::Credentials::load() {
                 if let Some(uid) = &creds.user_id {
                     analytics::track_activation(uid, "models", &mut config).await;
                 }
@@ -291,7 +291,7 @@ async fn cmd_login(config: &Config, method: &str) -> Result<()> {
     let m: auth::oauth::LoginMethod = method.parse()?;
     auth::oauth::login_with_method(&config.gateway_url, &m).await?;
 
-    if let Ok(creds) = auth::credentials::Credentials::load() {
+    if let Ok(creds) = auth::Credentials::load() {
         if let Some(uid) = &creds.user_id {
             analytics::track(
                 "user_signed_in",
@@ -307,7 +307,7 @@ async fn cmd_login(config: &Config, method: &str) -> Result<()> {
 }
 
 async fn cmd_login_status(config: &Config) -> Result<()> {
-    let creds = auth::credentials::Credentials::load().unwrap_or_default();
+    let creds = auth::Credentials::load().unwrap_or_default();
     if let Some(email) = &creds.email {
         println!("Logged in as: {}", email);
     } else {
@@ -337,17 +337,17 @@ async fn cmd_login_status(config: &Config) -> Result<()> {
 }
 
 fn cmd_logout(_config: &Config) -> Result<()> {
-    auth::credentials::Credentials::clear()?;
+    auth::clear_credentials()?;
     println!("Logged out.");
     Ok(())
 }
 
 async fn cmd_auth_token(config: &Config) -> Result<()> {
-    let creds = auth::credentials::Credentials::load()?;
+    let creds = auth::Credentials::load()?;
     if !creds.is_token_valid() {
         if let Some(refresh) = &creds.refresh_token {
-            let new_creds = auth::oauth::refresh_token(&config.gateway_url, refresh).await?;
-            new_creds.save()?;
+            let new_creds =
+                magelab_core::auth::refresh_token(&config.gateway_url, refresh).await?;
             if let Some(token) = &new_creds.access_token {
                 print!("{}", token); // No newline — for piping
                 return Ok(());
@@ -415,7 +415,7 @@ async fn cmd_connect(
 
     // Track activation funnel: connect
     if result.mode != "none" {
-        if let Ok(creds) = auth::credentials::Credentials::load() {
+        if let Ok(creds) = auth::Credentials::load() {
             if let Some(uid) = &creds.user_id {
                 let backend_type = match result.mode.as_str() {
                     "local" | "relay" => "local",
@@ -484,7 +484,7 @@ async fn cmd_launch(config: &mut Config, wait: bool) -> Result<()> {
         ui::label("check", "mage status");
     }
 
-    if let Ok(creds) = auth::credentials::Credentials::load() {
+    if let Ok(creds) = auth::Credentials::load() {
         if let Some(uid) = &creds.user_id {
             analytics::track_activation(uid, "launch", config).await;
         }
@@ -501,7 +501,7 @@ async fn cmd_status(config: &Config) -> Result<()> {
     );
     println!("URL: {}", config.local_url);
 
-    let creds = auth::credentials::Credentials::load().unwrap_or_default();
+    let creds = auth::Credentials::load().unwrap_or_default();
     let logged_in = creds.access_token.is_some() && creds.is_token_valid();
     println!(
         "Auth: {}",
@@ -533,7 +533,7 @@ async fn cmd_status(config: &Config) -> Result<()> {
 }
 
 async fn cmd_devices(config: &Config, action: Option<DevicesAction>, json: bool) -> Result<()> {
-    let creds = auth::credentials::Credentials::load()?;
+    let creds = auth::Credentials::load()?;
     let jwt = creds
         .access_token
         .as_deref()
