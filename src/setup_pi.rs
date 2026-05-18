@@ -13,6 +13,9 @@ const EXT_CONNECTION_TS: &str = include_str!("../extension/src/connection.ts");
 const EXT_WEBSOCKET_TS: &str = include_str!("../extension/src/websocket.ts");
 const EXT_TOOLS_TS: &str = include_str!("../extension/src/tools.ts");
 const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
+const EXT_COMMANDS_TS: &str = include_str!("../extension/src/commands.ts");
+const EXT_VALIDATION_TS: &str = include_str!("../extension/src/validation.ts");
+const EXT_PROTOCOL_TS: &str = include_str!("../extension/src/protocol.ts");
 
 pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let home =
@@ -157,6 +160,9 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::write(src_dir.join("websocket.ts"), EXT_WEBSOCKET_TS)?;
         std::fs::write(src_dir.join("tools.ts"), EXT_TOOLS_TS)?;
         std::fs::write(src_dir.join("gateway.ts"), EXT_GATEWAY_TS)?;
+        std::fs::write(src_dir.join("commands.ts"), EXT_COMMANDS_TS)?;
+        std::fs::write(src_dir.join("validation.ts"), EXT_VALIDATION_TS)?;
+        std::fs::write(src_dir.join("protocol.ts"), EXT_PROTOCOL_TS)?;
 
         sp.set_message("Installing dependencies...");
 
