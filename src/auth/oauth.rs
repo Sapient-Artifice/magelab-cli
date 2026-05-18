@@ -225,6 +225,12 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
         .nth(1)
         .context("Invalid HTTP request")?;
 
+    // SECURITY: Only accept requests to /callback path to prevent
+    // arbitrary requests on the loopback port from being treated as OAuth callbacks
+    if !path.starts_with("/callback") {
+        anyhow::bail!("Unexpected callback path: {}. Expected /callback", path);
+    }
+
     let url = url::Url::parse(&format!("http://localhost{}", path))
         .context("Failed to parse callback URL")?;
 
@@ -438,4 +444,34 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn callback_path_validation_rejects_non_callback() {
+        let path = "/favicon.ico";
+        assert!(
+            !path.starts_with("/callback"),
+            "Non-callback paths must be rejected"
+        );
+    }
+
+    #[test]
+    fn callback_path_validation_accepts_callback() {
+        let path = "/callback?code=abc123&state=xyz";
+        assert!(
+            path.starts_with("/callback"),
+            "/callback path must be accepted"
+        );
+    }
+
+    #[test]
+    fn callback_path_validation_rejects_root() {
+        let path = "/";
+        assert!(
+            !path.starts_with("/callback"),
+            "Root path must be rejected"
+        );
+    }
 }
