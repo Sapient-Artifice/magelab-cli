@@ -46,12 +46,7 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
             if let Ok(new_creds) =
                 magelab_core::auth::refresh_token(gateway_url, &bio_refresh).await
             {
-                // Core's refresh_token already saves to keychain; add Touch ID
-                if let Some(ref rt) = new_creds.refresh_token {
-                    if touchid::is_available() {
-                        touchid::store_secure(rt).ok();
-                    }
-                }
+                save_credentials(&new_creds).ok();
                 if let Some(t) = new_creds.access_token {
                     return Some(t);
                 }
@@ -61,6 +56,7 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
         // Fall back to regular refresh token
         if let Some(refresh) = &creds.refresh_token {
             if let Ok(new_creds) = magelab_core::auth::refresh_token(gateway_url, refresh).await {
+                save_credentials(&new_creds).ok();
                 return new_creds.access_token;
             }
         }

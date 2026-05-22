@@ -346,8 +346,8 @@ async fn cmd_auth_token(config: &Config) -> Result<()> {
     let creds = auth::Credentials::load()?;
     if !creds.is_token_valid() {
         if let Some(refresh) = &creds.refresh_token {
-            let new_creds =
-                magelab_core::auth::refresh_token(&config.gateway_url, refresh).await?;
+            let new_creds = magelab_core::auth::refresh_token(&config.gateway_url, refresh).await?;
+            auth::save_credentials(&new_creds)?;
             if let Some(token) = &new_creds.access_token {
                 print!("{}", token); // No newline — for piping
                 return Ok(());
