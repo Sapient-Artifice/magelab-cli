@@ -147,59 +147,63 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     let deadline = Instant::now() + Duration::from_secs(180);
     listener.set_nonblocking(true)?;
 
-    let (mut stream, _) = loop {
-        match listener.accept() {
-            Ok(conn) => break conn,
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "Login timed out — no response received within 3 minutes. Try again."
-                    );
+    loop {
+        // Accept next connection (poll with timeout)
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(conn) => break conn,
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        anyhow::bail!(
+                            "Login timed out — no response received within 3 minutes. Try again."
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                Err(e) => return Err(e).context("Failed to accept callback connection"),
             }
-            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        };
+
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut reader = std::io::BufReader::new(&stream);
+        let mut request_line = String::new();
+        if reader.read_line(&mut request_line).is_err() {
+            continue; // malformed connection, try next
         }
-    };
 
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    let mut reader = std::io::BufReader::new(&stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
+        let parts: Vec<&str> = request_line.split_whitespace().collect();
+        if parts.len() < 2 || parts[0] != "GET" {
+            continue; // non-GET request, skip
+        }
 
-    let method = request_line.split_whitespace().next().unwrap_or("");
-    if method != "GET" {
-        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
+        let url = match url::Url::parse(&format!("http://localhost{}", parts[1])) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+
+        if url.path() != "/callback" {
+            // Favicon, prefetch, or other non-callback request — send 404, keep listening
+            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+            continue;
+        }
+
+        let code = url
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .map(|(_, v)| v.to_string())
+            .context("No code in callback — login may have failed")?;
+
+        let html = cli_success_html();
+        let html_bytes = html.as_bytes();
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            html_bytes.len(),
+        );
+        stream.write_all(header.as_bytes()).ok();
+        stream.write_all(html_bytes).ok();
+
+        return Ok(code);
     }
-
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .context("Invalid HTTP request")?;
-
-    let url = url::Url::parse(&format!("http://localhost{}", path))
-        .context("Failed to parse callback URL")?;
-
-    if url.path() != "/callback" {
-        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
-    }
-
-    let code = url
-        .query_pairs()
-        .find(|(k, _)| k == "code")
-        .map(|(_, v)| v.to_string())
-        .context("No code in callback — login may have failed")?;
-
-    let html = cli_success_html();
-    let html_bytes = html.as_bytes();
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        html_bytes.len(),
-    );
-    stream.write_all(header.as_bytes()).ok();
-    stream.write_all(html_bytes).ok();
-
-    Ok(code)
 }
 
 /// Magic Auth login flow — exchanges code through the gateway
