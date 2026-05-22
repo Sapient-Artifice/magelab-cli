@@ -81,14 +81,9 @@ pub async fn get_token(config: &Config) -> Result<String> {
     }
 
     // Try vault
-    match magelab_core::vault::Vault::open() {
-        Ok(v) => {
-            if let Ok(Some(key)) = v.get("magelab_api_key") {
-                return Ok(key);
-            }
-        }
-        Err(_) => {
-            // Vault unavailable is expected — many users won't have the desktop installed
+    if let Ok(v) = magelab_core::vault::Vault::open() {
+        if let Ok(Some(key)) = v.get("magelab_api_key") {
+            return Ok(key);
         }
     }
 
