@@ -11,9 +11,6 @@ pub use magelab_core::auth::exchange_cli_code;
 #[allow(unused_imports)]
 pub use magelab_core::auth::refresh_token;
 
-/// WorkOS authorize endpoint
-const WORKOS_AUTHORIZE_URL: &str = "https://api.workos.com/user_management/authorize";
-
 /// Branded HTML page shown after successful OAuth callback
 const LOGIN_SUCCESS_HTML: &str = concat!(
     "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
@@ -330,49 +327,19 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     Ok(creds)
 }
 
-/// Google OAuth login flow — builds auth URL locally, exchanges code through gateway
+/// Google OAuth login flow — PKCE via shared loopback in magelab-core
 async fn login_google(gateway_url: &str) -> Result<Credentials> {
-    let cid_str = client_id();
-    let verifier = pkce::generate_code_verifier();
-    let challenge = pkce::generate_code_challenge(&verifier);
-    let state = pkce::generate_state();
-
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
-        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
-
-    let authorize_url = format!(
-        "{}?client_id={}&redirect_uri={}&provider=GoogleOAuth&response_type=code&state={}&code_challenge={}&code_challenge_method=S256",
-        WORKOS_AUTHORIZE_URL,
-        urlencoding::encode(&cid_str),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&state),
-        urlencoding::encode(&challenge),
-    );
-
-    crate::ui::label("open", &authorize_url);
-    open::that(&authorize_url).ok();
-
-    let sp = crate::ui::spinner("Waiting for authentication...");
-    let (code, returned_state) = wait_for_callback(listener)?;
-    sp.finish_and_clear();
-
-    if returned_state != state {
-        anyhow::bail!("OAuth state mismatch — possible CSRF attack");
-    }
-
-    let sp = crate::ui::spinner("Exchanging authorization code...");
-    let creds = core_auth::exchange_token(
+    let sp = crate::ui::spinner("Opening browser for authentication...");
+    let creds = core_auth::pkce_loopback_login(
         gateway_url,
-        &serde_json::json!({
-            "grant_type": "authorization_code",
-            "code": code,
-            "code_verifier": verifier,
-            "redirect_uri": redirect_uri,
-            "client_id": cid_str,
-        }),
+        |url| {
+            crate::ui::label("open", url);
+            open::that(url).map_err(|e| core_auth::AuthError::Http(e.to_string()))
+        },
+        Some(LOGIN_SUCCESS_HTML),
     )
-    .await?;
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     sp.finish_and_clear();
 
     super::save_credentials(&creds)?;
@@ -381,71 +348,6 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
     }
     crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
-}
-
-fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
-    use std::time::{Duration, Instant};
-
-    let deadline = Instant::now() + Duration::from_secs(180);
-    listener.set_nonblocking(true)?;
-
-    let (mut stream, _) = loop {
-        match listener.accept() {
-            Ok(conn) => break conn,
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "Login timed out — no response received within 3 minutes. Try again."
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => return Err(e).context("Failed to accept callback connection"),
-        }
-    };
-
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    let mut reader = std::io::BufReader::new(&stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-
-    let method = request_line.split_whitespace().next().unwrap_or("");
-    if method != "GET" {
-        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
-    }
-
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .context("Invalid HTTP request")?;
-
-    let url = url::Url::parse(&format!("http://localhost{}", path))
-        .context("Failed to parse callback URL")?;
-
-    if url.path() != "/callback" {
-        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
-    }
-
-    let code = url
-        .query_pairs()
-        .find(|(k, _)| k == "code")
-        .map(|(_, v)| v.to_string())
-        .context("No authorization code in callback")?;
-
-    let state = url
-        .query_pairs()
-        .find(|(k, _)| k == "state")
-        .map(|(_, v)| v.to_string())
-        .unwrap_or_default();
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        LOGIN_SUCCESS_HTML.len(),
-        LOGIN_SUCCESS_HTML,
-    );
-    stream.write_all(response.as_bytes()).ok();
-
-    Ok((code, state))
 }
 
 #[cfg(test)]
