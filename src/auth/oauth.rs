@@ -228,6 +228,10 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     let url = url::Url::parse(&format!("http://localhost{}", path))
         .context("Failed to parse callback URL")?;
 
+    if url.path() != "/callback" {
+        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
+    }
+
     let code = url
         .query_pairs()
         .find(|(k, _)| k == "code")
@@ -418,6 +422,10 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
     let url = url::Url::parse(&format!("http://localhost{}", path))
         .context("Failed to parse callback URL")?;
 
+    if url.path() != "/callback" {
+        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
+    }
+
     let code = url
         .query_pairs()
         .find(|(k, _)| k == "code")
@@ -438,4 +446,41 @@ fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
     stream.write_all(response.as_bytes()).ok();
 
     Ok((code, state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn validate_callback_path(path: &str) -> anyhow::Result<()> {
+        let url = url::Url::parse(&format!("http://localhost{}", path))
+            .context("Failed to parse callback URL")?;
+        if url.path() != "/callback" {
+            anyhow::bail!(
+                "Unexpected request path '{}', expected /callback",
+                url.path()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn callback_path_accepted() {
+        assert!(validate_callback_path("/callback?code=abc123").is_ok());
+        assert!(validate_callback_path("/callback?code=abc&state=xyz").is_ok());
+        assert!(validate_callback_path("/callback").is_ok());
+    }
+
+    #[test]
+    fn callback_path_rejected_for_prefix_attack() {
+        assert!(validate_callback_path("/callbackevil?code=abc").is_err());
+        assert!(validate_callback_path("/callback/extra?code=abc").is_err());
+    }
+
+    #[test]
+    fn callback_path_rejected_for_wrong_path() {
+        assert!(validate_callback_path("/?code=abc").is_err());
+        assert!(validate_callback_path("/evil/callback?code=abc").is_err());
+        assert!(validate_callback_path("/other?code=abc").is_err());
+    }
 }
