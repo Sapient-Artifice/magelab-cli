@@ -3,7 +3,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::net::TcpListener;
 use std::str::FromStr;
 
-use magelab_core::auth::{self as core_auth, pkce, Credentials};
+use magelab_core::auth::{self as core_auth, pkce, Credentials, LOOPBACK_PORT};
 
 // Re-export core auth functions for the public API (used by integration tests)
 #[allow(unused_imports)]
@@ -11,39 +11,10 @@ pub use magelab_core::auth::exchange_cli_code;
 #[allow(unused_imports)]
 pub use magelab_core::auth::refresh_token;
 
-/// WorkOS authorize endpoint
-const WORKOS_AUTHORIZE_URL: &str = "https://api.workos.com/user_management/authorize";
-
-/// Branded HTML page shown after successful OAuth callback
-const LOGIN_SUCCESS_HTML: &str = concat!(
-    "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">",
-    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
-    "<meta name=\"referrer\" content=\"no-referrer\">",
-    "<title>Mage Lab — Login Successful</title>",
-    "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
-    "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
-    "<link href=\"https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap\" rel=\"stylesheet\">",
-    "<style>",
-    "*{margin:0;padding:0;box-sizing:border-box}",
-    "body{background:#09090b;color:#fafafa;font-family:'Geist',system-ui,sans-serif;",
-    "min-height:100vh;display:flex;align-items:center;justify-content:center}",
-    ".card{text-align:center;max-width:400px;padding:3rem 2rem}",
-    ".icon{width:48px;height:48px;margin:0 auto 1.5rem;border-radius:12px;",
-    "background:linear-gradient(135deg,#8b5cf6,#7c3aed);",
-    "display:flex;align-items:center;justify-content:center}",
-    ".icon svg{width:24px;height:24px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}",
-    "h1{font-size:1.25rem;font-weight:600;margin-bottom:.5rem;letter-spacing:-.01em}",
-    "p{color:#a1a1aa;font-size:.875rem;line-height:1.5}",
-    ".hint{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.06);",
-    "color:#71717a;font-size:.75rem;font-family:'Geist Mono',monospace}",
-    "</style></head><body>",
-    "<div class=\"card\">",
-    "<div class=\"icon\"><svg viewBox=\"0 0 24 24\"><polyline points=\"20 6 9 17 4 12\"/></svg></div>",
-    "<h1>Login successful</h1>",
-    "<p>You can close this tab and return to the terminal.</p>",
-    "<div class=\"hint\">mage cli</div>",
-    "</div></body></html>",
-);
+/// Build CLI-specific success HTML (says "return to the terminal" / "mage cli").
+fn cli_success_html() -> String {
+    core_auth::login_success_html("return to the terminal", "mage cli")
+}
 
 /// Prompt for user input from stdin
 fn prompt(label: &str) -> String {
@@ -52,12 +23,6 @@ fn prompt(label: &str) -> String {
     std::io::stdin().read_line(&mut input).unwrap_or_default();
     input.trim().to_string()
 }
-
-/// WorkOS Client ID (shared with web frontend)
-const DEFAULT_CLIENT_ID: &str = "client_01KKJ9GJKHDMW63A3RCV56KVZ6";
-
-/// Fixed loopback port (must match WorkOS redirect URI config)
-const LOOPBACK_PORT: u16 = 19872;
 
 /// URL for new account signup
 const SIGNUP_URL: &str = "https://magelab.ai/signup";
@@ -88,19 +53,6 @@ impl FromStr for LoginMethod {
             ),
         }
     }
-}
-
-/// Get WorkOS Client ID from env or default
-fn client_id() -> String {
-    std::env::var("WORKOS_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string())
-}
-
-/// Get auth base URL. Defaults to {gateway_url}/v1/auth.
-/// Override with MAGELAB_AUTH_URL for testing against the web app
-/// (e.g. MAGELAB_AUTH_URL=http://localhost:3007/api/auth)
-fn auth_base_url(gateway_url: &str) -> String {
-    std::env::var("MAGELAB_AUTH_URL")
-        .unwrap_or_else(|_| format!("{}/v1/auth", gateway_url.trim_end_matches('/')))
 }
 
 /// Get the MageLab web app URL for browser-based login.
@@ -195,63 +147,69 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
     let deadline = Instant::now() + Duration::from_secs(180);
     listener.set_nonblocking(true)?;
 
-    let (mut stream, _) = loop {
-        match listener.accept() {
-            Ok(conn) => break conn,
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "Login timed out — no response received within 3 minutes. Try again."
-                    );
+    loop {
+        // Accept next connection (poll with timeout)
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(conn) => break conn,
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        anyhow::bail!(
+                            "Login timed out — no response received within 3 minutes. Try again."
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                Err(e) => return Err(e).context("Failed to accept callback connection"),
             }
-            Err(e) => return Err(e).context("Failed to accept callback connection"),
+        };
+
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut reader = std::io::BufReader::new(&stream);
+        let mut request_line = String::new();
+        if reader.read_line(&mut request_line).is_err() {
+            continue; // malformed connection, try next
         }
-    };
 
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    let mut reader = std::io::BufReader::new(&stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
+        let parts: Vec<&str> = request_line.split_whitespace().collect();
+        if parts.len() < 2 || parts[0] != "GET" {
+            continue; // non-GET request, skip
+        }
 
-    let method = request_line.split_whitespace().next().unwrap_or("");
-    if method != "GET" {
-        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
+        let url = match url::Url::parse(&format!("http://localhost{}", parts[1])) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+
+        if url.path() != "/callback" {
+            // Favicon, prefetch, or other non-callback request — send 404, keep listening
+            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+            continue;
+        }
+
+        let code = url
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .map(|(_, v)| v.to_string())
+            .context("No code in callback — login may have failed")?;
+
+        let html = cli_success_html();
+        let html_bytes = html.as_bytes();
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            html_bytes.len(),
+        );
+        stream.write_all(header.as_bytes()).ok();
+        stream.write_all(html_bytes).ok();
+
+        return Ok(code);
     }
-
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .context("Invalid HTTP request")?;
-
-    let url = url::Url::parse(&format!("http://localhost{}", path))
-        .context("Failed to parse callback URL")?;
-
-    if url.path() != "/callback" {
-        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
-    }
-
-    let code = url
-        .query_pairs()
-        .find(|(k, _)| k == "code")
-        .map(|(_, v)| v.to_string())
-        .context("No code in callback — login may have failed")?;
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        LOGIN_SUCCESS_HTML.len(),
-        LOGIN_SUCCESS_HTML,
-    );
-    stream.write_all(response.as_bytes()).ok();
-
-    Ok(code)
 }
 
 /// Magic Auth login flow — exchanges code through the gateway
 async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     let http = reqwest::Client::new();
-    let cid = client_id();
+    let cid = core_auth::client_id();
 
     let email = if std::io::stdin().is_terminal() {
         crate::ui::animated_prompt("Email:")
@@ -264,7 +222,7 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
 
     let sp = crate::ui::spinner(&format!("Sending code to {email}..."));
     let resp = http
-        .post(format!("{}/magic-auth", auth_base_url(gateway_url)))
+        .post(format!("{}/magic-auth", core_auth::auth_base_url(gateway_url)))
         .json(&serde_json::json!({
             "email": email,
             "client_id": cid,
@@ -330,49 +288,20 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
     Ok(creds)
 }
 
-/// Google OAuth login flow — builds auth URL locally, exchanges code through gateway
+/// Google OAuth login flow — PKCE via shared loopback in magelab-core
 async fn login_google(gateway_url: &str) -> Result<Credentials> {
-    let cid_str = client_id();
-    let verifier = pkce::generate_code_verifier();
-    let challenge = pkce::generate_code_challenge(&verifier);
-    let state = pkce::generate_state();
-
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", LOOPBACK_PORT))
-        .context("Failed to start loopback server on port 19872 — is another instance running?")?;
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", LOOPBACK_PORT);
-
-    let authorize_url = format!(
-        "{}?client_id={}&redirect_uri={}&provider=GoogleOAuth&response_type=code&state={}&code_challenge={}&code_challenge_method=S256",
-        WORKOS_AUTHORIZE_URL,
-        urlencoding::encode(&cid_str),
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode(&state),
-        urlencoding::encode(&challenge),
-    );
-
-    crate::ui::label("open", &authorize_url);
-    open::that(&authorize_url).ok();
-
-    let sp = crate::ui::spinner("Waiting for authentication...");
-    let (code, returned_state) = wait_for_callback(listener)?;
-    sp.finish_and_clear();
-
-    if returned_state != state {
-        anyhow::bail!("OAuth state mismatch — possible CSRF attack");
-    }
-
-    let sp = crate::ui::spinner("Exchanging authorization code...");
-    let creds = core_auth::exchange_token(
+    let sp = crate::ui::spinner("Opening browser for authentication...");
+    let html = cli_success_html();
+    let creds = core_auth::pkce_loopback_login(
         gateway_url,
-        &serde_json::json!({
-            "grant_type": "authorization_code",
-            "code": code,
-            "code_verifier": verifier,
-            "redirect_uri": redirect_uri,
-            "client_id": cid_str,
-        }),
+        |url| {
+            crate::ui::label("open", url);
+            open::that(url).map_err(|e| core_auth::AuthError::Http(e.to_string()))
+        },
+        Some(&html),
     )
-    .await?;
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     sp.finish_and_clear();
 
     super::save_credentials(&creds)?;
@@ -381,71 +310,6 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
     }
     crate::ui::label("credentials", &Credentials::path()?.display().to_string());
     Ok(creds)
-}
-
-fn wait_for_callback(listener: TcpListener) -> Result<(String, String)> {
-    use std::time::{Duration, Instant};
-
-    let deadline = Instant::now() + Duration::from_secs(180);
-    listener.set_nonblocking(true)?;
-
-    let (mut stream, _) = loop {
-        match listener.accept() {
-            Ok(conn) => break conn,
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "Login timed out — no response received within 3 minutes. Try again."
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => return Err(e).context("Failed to accept callback connection"),
-        }
-    };
-
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
-    let mut reader = std::io::BufReader::new(&stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-
-    let method = request_line.split_whitespace().next().unwrap_or("");
-    if method != "GET" {
-        anyhow::bail!("Unexpected HTTP method in OAuth callback: {}", method);
-    }
-
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .context("Invalid HTTP request")?;
-
-    let url = url::Url::parse(&format!("http://localhost{}", path))
-        .context("Failed to parse callback URL")?;
-
-    if url.path() != "/callback" {
-        anyhow::bail!("Unexpected request path '{}', expected /callback", url.path());
-    }
-
-    let code = url
-        .query_pairs()
-        .find(|(k, _)| k == "code")
-        .map(|(_, v)| v.to_string())
-        .context("No authorization code in callback")?;
-
-    let state = url
-        .query_pairs()
-        .find(|(k, _)| k == "state")
-        .map(|(_, v)| v.to_string())
-        .unwrap_or_default();
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        LOGIN_SUCCESS_HTML.len(),
-        LOGIN_SUCCESS_HTML,
-    );
-    stream.write_all(response.as_bytes()).ok();
-
-    Ok((code, state))
 }
 
 #[cfg(test)]
