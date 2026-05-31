@@ -314,7 +314,6 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
             open::that(url).map_err(|e| core_auth::AuthError::Http(e.to_string()))
         },
         Some(&html),
-        None,
     )
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;
