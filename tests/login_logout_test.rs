@@ -7,6 +7,7 @@ use assert_cmd::Command;
 use magelab_cli::auth::oauth;
 use magelab_cli::auth::Credentials;
 use predicates::prelude::*;
+use tempfile::TempDir;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -149,10 +150,14 @@ fn test_logout_succeeds_when_not_logged_in() {
     if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
         return;
     }
+    let tmp = TempDir::new().unwrap();
     Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
         .timeout(std::time::Duration::from_secs(10))
+        .env("HOME", tmp.path())
+        .env("USERPROFILE", tmp.path())
+        .env("MAGELAB_SKIP_KEYCHAIN_TESTS", "1")
         .assert()
         .success()
         .stdout(predicate::str::contains("Logged out"));
@@ -164,11 +169,15 @@ fn test_login_status_after_logout() {
     if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
         return;
     }
+    let tmp = TempDir::new().unwrap();
     // Logout first to ensure clean state
     Command::cargo_bin("mage")
         .unwrap()
         .arg("logout")
         .timeout(std::time::Duration::from_secs(10))
+        .env("HOME", tmp.path())
+        .env("USERPROFILE", tmp.path())
+        .env("MAGELAB_SKIP_KEYCHAIN_TESTS", "1")
         .assert()
         .success();
 
@@ -176,6 +185,9 @@ fn test_login_status_after_logout() {
         .unwrap()
         .args(["login", "--status"])
         .timeout(std::time::Duration::from_secs(10))
+        .env("HOME", tmp.path())
+        .env("USERPROFILE", tmp.path())
+        .env("MAGELAB_SKIP_KEYCHAIN_TESTS", "1")
         .env_remove("MAGELAB_API_KEY")
         .assert()
         .success()
@@ -188,10 +200,14 @@ fn test_login_status_shows_api_key() {
     if std::env::var("MAGELAB_SKIP_KEYCHAIN_TESTS").is_ok() {
         return;
     }
+    let tmp = TempDir::new().unwrap();
     Command::cargo_bin("mage")
         .unwrap()
         .args(["login", "--status"])
         .timeout(std::time::Duration::from_secs(10))
+        .env("HOME", tmp.path())
+        .env("USERPROFILE", tmp.path())
+        .env("MAGELAB_SKIP_KEYCHAIN_TESTS", "1")
         .env("MAGELAB_API_KEY", "sk-test-1234567890abcdef")
         .assert()
         .success()

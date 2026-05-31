@@ -1,6 +1,8 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
 #[test]
@@ -41,35 +43,29 @@ fn test_setup_pi_detects_missing_pi_and_npm() {
 fn test_setup_pi_offers_install_when_npm_available() {
     // Pi not on PATH but npm is — should prompt to install
     // We pass "n" via stdin to decline
-    // Skip if neither npm nor pnpm is available on this system
-    let has_npm = std::process::Command::new("npm")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    let has_pnpm = std::process::Command::new("pnpm")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !has_npm && !has_pnpm {
-        eprintln!("Skipping: npm/pnpm not available on this system");
-        return;
-    }
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let pnpm = bin_dir.join(if cfg!(windows) { "pnpm.bat" } else { "pnpm" });
+    fs::write(
+        &pnpm,
+        if cfg!(windows) {
+            "@echo 9.0.0\r\n"
+        } else {
+            "#!/bin/sh\necho 9.0.0\n"
+        },
+    )
+    .unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&pnpm, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    let path = format!(
-        "/nonexistent{sep}{}",
-        std::env::var("PATH").unwrap_or_default()
-    );
     Command::cargo_bin("mage")
         .unwrap()
         .arg("setup-pi")
-        .env("PATH", &path)
+        .env("PATH", &bin_dir)
+        .env("HOME", tmp.path())
+        .env("USERPROFILE", tmp.path())
+        .timeout(std::time::Duration::from_secs(10))
         .write_stdin("n\n")
         .assert()
         .success()

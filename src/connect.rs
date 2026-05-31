@@ -119,9 +119,6 @@ pub async fn resolve(config: &Config, no_launch: bool) -> Result<ConnectResult> 
 }
 
 /// Try to get a valid JWT, refreshing if expired (with biometric fallback)
-async fn get_valid_jwt(
-    creds: &auth::Credentials,
-    gateway_url: &str,
-) -> Option<String> {
+async fn get_valid_jwt(creds: &auth::Credentials, gateway_url: &str) -> Option<String> {
     auth::get_valid_jwt(creds, gateway_url).await
 }
