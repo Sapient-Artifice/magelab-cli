@@ -171,6 +171,21 @@ fn wait_for_code_callback(listener: TcpListener) -> Result<String> {
             continue; // malformed connection, try next
         }
 
+        // Drain remaining HTTP headers to prevent "connection reset" on
+        // browsers that wait for the full request to be consumed.
+        {
+            let mut header = String::new();
+            loop {
+                header.clear();
+                match reader.read_line(&mut header) {
+                    Ok(0) => break,
+                    Ok(_) if header.trim().is_empty() => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        }
+
         let parts: Vec<&str> = request_line.split_whitespace().collect();
         if parts.len() < 2 || parts[0] != "GET" {
             continue; // non-GET request, skip
@@ -299,6 +314,7 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
             open::that(url).map_err(|e| core_auth::AuthError::Http(e.to_string()))
         },
         Some(&html),
+        None,
     )
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;
