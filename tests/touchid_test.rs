@@ -145,8 +145,8 @@ mod refresh_path_tests {
 }
 
 mod credential_integration_tests {
-    use magelab_cli::auth::Credentials;
     use magelab_cli::auth::touchid;
+    use magelab_cli::auth::Credentials;
 
     #[test]
     fn save_with_touchid_disabled_preserves_refresh_token_in_regular_store() {

@@ -237,7 +237,10 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
 
     let sp = crate::ui::spinner(&format!("Sending code to {email}..."));
     let resp = http
-        .post(format!("{}/magic-auth", core_auth::auth_base_url(gateway_url)))
+        .post(format!(
+            "{}/magic-auth",
+            core_auth::auth_base_url(gateway_url)
+        ))
         .json(&serde_json::json!({
             "email": email,
             "client_id": cid,
@@ -314,6 +317,7 @@ async fn login_google(gateway_url: &str) -> Result<Credentials> {
             open::that(url).map_err(|e| core_auth::AuthError::Http(e.to_string()))
         },
         Some(&html),
+        None,
     )
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;
