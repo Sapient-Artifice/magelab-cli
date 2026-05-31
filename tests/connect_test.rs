@@ -51,3 +51,15 @@ fn test_connect_result_serializes_none() {
     assert_eq!(json["mode"], "none");
     assert!(json["url"].is_null());
 }
+
+#[test]
+fn test_ws_to_http_url() {
+    assert_eq!(
+        magelab_cli::connect::ws_to_http_url("ws://127.0.0.1:8787/ws"),
+        "http://127.0.0.1:8787"
+    );
+    assert_eq!(
+        magelab_cli::connect::ws_to_http_url("wss://example.com/ws"),
+        "https://example.com"
+    );
+}

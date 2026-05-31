@@ -3,6 +3,21 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendBundleKind {
+    DevRepo,
+    PackagedApp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendBundle {
+    pub kind: BackendBundleKind,
+    pub root: PathBuf,
+    pub api_dir: Option<PathBuf>,
+    pub backend_dir: PathBuf,
+    pub python: PathBuf,
+}
+
 /// Discover online devices for the authenticated user
 pub async fn discover_devices(gateway_url: &str, jwt: &str) -> Result<Vec<String>> {
     let client = reqwest::Client::new();
@@ -80,6 +95,7 @@ pub async fn check_backend_health(local_url: &str) -> bool {
 }
 
 /// Find the mage-lab installation directory
+#[allow(dead_code)]
 pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
     // 1. MAGELAB_HOME env var (highest priority)
     if let Ok(home) = std::env::var("MAGELAB_HOME") {
@@ -136,6 +152,125 @@ pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
         .find(|path| path.join("backend").join("main.py").exists())
 }
 
+/// Find a launchable backend bundle for either a dev repo or packaged app.
+pub fn find_backend_bundle(config_override: Option<&str>) -> Result<Option<BackendBundle>> {
+    if let Ok(api_dir) = std::env::var("MAGELAB_API_DIR") {
+        return Ok(resolve_backend_bundle_path(Path::new(&api_dir))?);
+    }
+
+    if let Ok(home) = std::env::var("MAGELAB_HOME") {
+        return Ok(resolve_backend_bundle_path(Path::new(&home))?);
+    }
+
+    if let Some(override_path) = config_override {
+        if !override_path.is_empty() {
+            return Ok(resolve_backend_bundle_path(Path::new(override_path))?);
+        }
+    }
+
+    for candidate in dev_layout_candidates() {
+        if let Some(bundle) = resolve_dev_repo_bundle(&candidate) {
+            return Ok(Some(bundle));
+        }
+    }
+
+    for candidate in platform_default_paths() {
+        if let Some(bundle) = resolve_backend_bundle_path(&candidate)? {
+            return Ok(Some(bundle));
+        }
+    }
+
+    Ok(None)
+}
+
+fn resolve_backend_bundle_path(path: &Path) -> Result<Option<BackendBundle>> {
+    if path.file_name().and_then(|n| n.to_str()) == Some("main.py") {
+        anyhow::bail!(
+            "magelab_home should point to the MageLab install root or bundled API directory, not backend/main.py."
+        );
+    }
+
+    if let Some(bundle) = resolve_packaged_api_bundle(path) {
+        return Ok(Some(bundle));
+    }
+
+    for api_dir in packaged_api_candidates(path) {
+        if let Some(bundle) = resolve_packaged_api_bundle(&api_dir) {
+            return Ok(Some(bundle));
+        }
+    }
+
+    if let Some(bundle) = resolve_dev_repo_bundle(path) {
+        return Ok(Some(bundle));
+    }
+
+    Ok(None)
+}
+
+fn resolve_dev_repo_bundle(root: &Path) -> Option<BackendBundle> {
+    let backend_dir = root.join("backend");
+    if !backend_dir.join("main.py").exists() {
+        return None;
+    }
+
+    Some(BackendBundle {
+        kind: BackendBundleKind::DevRepo,
+        root: root.to_path_buf(),
+        api_dir: None,
+        python: dev_python(&backend_dir),
+        backend_dir,
+    })
+}
+
+fn resolve_packaged_api_bundle(api_dir: &Path) -> Option<BackendBundle> {
+    let backend_dir = api_dir.join("backend");
+    if !backend_dir.join("main.py").exists() {
+        return None;
+    }
+
+    let python = packaged_python(api_dir)?;
+    Some(BackendBundle {
+        kind: BackendBundleKind::PackagedApp,
+        root: api_dir.to_path_buf(),
+        api_dir: Some(api_dir.to_path_buf()),
+        backend_dir,
+        python,
+    })
+}
+
+fn packaged_api_candidates(root: &Path) -> Vec<PathBuf> {
+    vec![
+        root.join("bin").join("api"),
+        root.join("Contents")
+            .join("Resources")
+            .join("bin")
+            .join("api"),
+    ]
+}
+
+fn dev_layout_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.clone());
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join("mage-lab"));
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        for _ in 0..4 {
+            dir = dir.and_then(|d| d.parent().map(|p| p.to_path_buf()));
+            if let Some(ref d) = dir {
+                candidates.push(d.join("mage-lab"));
+            }
+        }
+    }
+
+    candidates
+}
+
 fn platform_default_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let home = dirs::home_dir();
@@ -144,8 +279,10 @@ fn platform_default_paths() -> Vec<PathBuf> {
     {
         if let Some(h) = &home {
             paths.push(h.join("Applications").join("Mage Lab"));
+            paths.push(h.join("Applications").join("magelab.app"));
         }
         paths.push(PathBuf::from("/Applications/Mage Lab"));
+        paths.push(PathBuf::from("/Applications/magelab.app"));
     }
 
     #[cfg(target_os = "linux")]
@@ -154,11 +291,14 @@ fn platform_default_paths() -> Vec<PathBuf> {
             paths.push(h.join(".local/share/magelab"));
         }
         paths.push(PathBuf::from("/opt/magelab"));
+        paths.push(PathBuf::from("/usr/lib/magelab"));
+        paths.push(PathBuf::from("/usr/lib/magelab/bin/api"));
     }
 
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            paths.push(PathBuf::from(&local).join("magelab"));
             paths.push(PathBuf::from(local).join("MageLab"));
         }
         if let Ok(pf) = std::env::var("PROGRAMFILES") {
@@ -170,19 +310,14 @@ fn platform_default_paths() -> Vec<PathBuf> {
 }
 
 /// Launch the Python backend in headless mode.
-/// `port` is extracted from the configured local_url so it stays in sync.
 /// If `relay_enabled` is true, sets REALTIME_DESKTOP_BROKER_ENABLED=1 so
 /// the backend registers as a relay device with the gateway.
 pub fn launch_backend_headless(
-    magelab_home: &Path,
+    bundle: &BackendBundle,
+    host: &str,
     port: u16,
     relay_enabled: bool,
 ) -> Result<Child> {
-    let backend_dir = magelab_home.join("backend");
-
-    // Try to find Python in the mage-lab venv first, then system
-    let python = find_python(&backend_dir);
-
     // Log backend output to ~/.config/magelab/backend.log
     let log_dir = dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
@@ -195,19 +330,23 @@ pub fn launch_backend_headless(
             Err(_) => (Stdio::null(), Stdio::null()),
         };
 
-    let mut cmd = Command::new(&python);
+    let backend_arg = bundle.backend_dir.to_string_lossy().to_string();
+    let port_arg = port.to_string();
+    let mut cmd = Command::new(&bundle.python);
     cmd.args([
         "-m",
         "uvicorn",
         "main:app",
+        "--app-dir",
+        &backend_arg,
         "--host",
-        "127.0.0.1",
+        host,
         "--port",
-        &port.to_string(),
+        &port_arg,
         "--log-level",
         "warning",
     ])
-    .current_dir(&backend_dir)
+    .current_dir(&bundle.backend_dir)
     .stdin(Stdio::null())
     .stdout(stdout_cfg)
     .stderr(stderr_cfg);
@@ -216,9 +355,12 @@ pub fn launch_backend_headless(
         cmd.env("REALTIME_DESKTOP_BROKER_ENABLED", "1");
     }
 
-    let child = cmd
-        .spawn()
-        .with_context(|| format!("Failed to launch backend from {}", backend_dir.display()))?;
+    let child = cmd.spawn().with_context(|| {
+        format!(
+            "Failed to launch backend from {}",
+            bundle.backend_dir.display()
+        )
+    })?;
 
     Ok(child)
 }
@@ -231,7 +373,12 @@ pub fn port_from_url(url: &str) -> u16 {
         .unwrap_or(11115)
 }
 
+#[allow(dead_code)]
 pub fn find_python(backend_dir: &Path) -> String {
+    dev_python(backend_dir).to_string_lossy().into()
+}
+
+fn dev_python(backend_dir: &Path) -> PathBuf {
     // Check for venv — path differs by platform
     #[cfg(not(target_os = "windows"))]
     let venv_python = backend_dir.join(".venv").join("bin").join("python");
@@ -239,18 +386,31 @@ pub fn find_python(backend_dir: &Path) -> String {
     let venv_python = backend_dir.join(".venv").join("Scripts").join("python.exe");
 
     if venv_python.exists() {
-        return venv_python.to_string_lossy().into();
+        return venv_python;
     }
 
     // Fallback to system
     #[cfg(not(target_os = "windows"))]
     {
-        "python3".to_string()
+        PathBuf::from("python3")
     }
     #[cfg(target_os = "windows")]
     {
-        "python".to_string()
+        PathBuf::from("python")
     }
+}
+
+fn packaged_python(api_dir: &Path) -> Option<PathBuf> {
+    #[cfg(not(target_os = "windows"))]
+    let candidates = [api_dir.join("python").join("bin").join("python3")];
+
+    #[cfg(target_os = "windows")]
+    let candidates = [
+        api_dir.join("python").join("python.exe"),
+        api_dir.join("python").join("Scripts").join("python.exe"),
+    ];
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 /// Poll the backend health endpoint until it's ready

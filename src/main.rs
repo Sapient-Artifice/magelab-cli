@@ -66,12 +66,27 @@ enum Commands {
         /// Force remote REST mode only
         #[arg(long, conflicts_with_all = ["local", "relay"])]
         remote: bool,
+        /// Probe this HTTP backend URL instead of config.local_url
+        #[arg(long, conflicts_with = "ws")]
+        url: Option<String>,
+        /// Probe this WebSocket backend URL instead of config.local_url
+        #[arg(long, conflicts_with = "url")]
+        ws: Option<String>,
     },
     /// Start the headless backend
     Launch {
         /// Block until backend is healthy, then print URL
         #[arg(long)]
         wait: bool,
+        /// Bind host for the headless backend
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Bind port for the headless backend (defaults to local_url port)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Print the resolved backend launch command without spawning it
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Show backend health and connection info
     Status,
@@ -228,11 +243,18 @@ async fn main() -> Result<()> {
             local,
             relay,
             remote,
+            url,
+            ws,
         } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "connect")?;
-            cmd_connect(&config, json, no_launch, local, relay, remote).await
+            cmd_connect(&config, json, no_launch, local, relay, remote, url, ws).await
         }
-        Commands::Launch { wait } => cmd_launch(&mut config, wait).await,
+        Commands::Launch {
+            wait,
+            host,
+            port,
+            dry_run,
+        } => cmd_launch(&mut config, wait, &host, port, dry_run).await,
         Commands::Status => cmd_status(&config).await,
         Commands::Devices { action, json } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access devices")?;
@@ -371,11 +393,20 @@ async fn cmd_connect(
     local: bool,
     relay: bool,
     remote: bool,
+    url: Option<String>,
+    ws: Option<String>,
 ) -> Result<()> {
+    let has_url_override = url.is_some() || ws.is_some();
+    let local_url = ws
+        .as_deref()
+        .map(connect::ws_to_http_url)
+        .or(url)
+        .unwrap_or_else(|| config.local_url.clone());
+
     let result = if local {
-        if detect::check_backend_health(&config.local_url).await {
+        if detect::check_backend_health(&local_url).await {
             connect::ConnectResult {
-                url: Some(connect::to_ws_url(&config.local_url)),
+                url: Some(connect::to_ws_url(&local_url)),
                 token: None,
                 mode: "local".to_string(),
                 model: Some(config.default_model.clone()),
@@ -410,7 +441,7 @@ async fn cmd_connect(
         }
         r
     } else {
-        connect::resolve(config, no_launch).await?
+        connect::resolve_with_local_url(config, no_launch || has_url_override, &local_url).await?
     };
 
     // Track activation funnel: connect
@@ -453,26 +484,39 @@ async fn cmd_connect(
     Ok(())
 }
 
-async fn cmd_launch(config: &mut Config, wait: bool) -> Result<()> {
-    let home = detect::find_magelab_home(config.magelab_home.as_deref()).ok_or_else(|| {
-        anyhow::anyhow!("MageLab installation not found. Set magelab_home in config.")
+async fn cmd_launch(
+    config: &mut Config,
+    wait: bool,
+    host: &str,
+    port: Option<u16>,
+    dry_run: bool,
+) -> Result<()> {
+    let bundle = detect::find_backend_bundle(config.magelab_home.as_deref())?.ok_or_else(|| {
+        anyhow::anyhow!("MageLab backend bundle not found. Set magelab_home or MAGELAB_API_DIR.")
     })?;
 
-    let port = detect::port_from_url(&config.local_url);
-    let child = detect::launch_backend_headless(&home, port, config.relay_enabled)?;
+    let port = port.unwrap_or_else(|| detect::port_from_url(&config.local_url));
+    let wait_url = wait_url(host, port);
+    if dry_run {
+        print_launch_plan(&bundle, host, port);
+        return Ok(());
+    }
+
+    let child = detect::launch_backend_headless(&bundle, host, port, config.relay_enabled)?;
     // Detach the child so it outlives this CLI invocation
     std::mem::forget(child);
 
     if wait {
         let sp = ui::spinner("Starting backend...");
-        detect::wait_for_backend(&config.local_url, std::time::Duration::from_secs(30)).await?;
+        detect::wait_for_backend(&wait_url, std::time::Duration::from_secs(30)).await?;
         sp.finish_and_clear();
-        ui::success(&format!("Backend ready at {}", config.local_url));
+        ui::success(&format!("Backend ready at {}", wait_url));
 
         // Auto-push vault secrets (same as desktop's initSecrets startup flow)
         if let Ok(v) = magelab_core::vault::Vault::open() {
             if let Ok(secrets) = v.all_secrets() {
                 if !secrets.is_empty() {
+                    config.local_url = wait_url.clone();
                     if let Err(e) = vault::push_secrets(config).await {
                         eprintln!("Warning: vault push failed: {e}");
                     }
@@ -491,6 +535,29 @@ async fn cmd_launch(config: &mut Config, wait: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn wait_url(host: &str, port: u16) -> String {
+    let health_host = if host == "0.0.0.0" { "127.0.0.1" } else { host };
+    format!("http://{}:{}", health_host, port)
+}
+
+fn print_launch_plan(bundle: &detect::BackendBundle, host: &str, port: u16) {
+    println!("Backend kind:  {:?}", bundle.kind);
+    println!("Root:          {}", bundle.root.display());
+    if let Some(api_dir) = &bundle.api_dir {
+        println!("API dir:       {}", api_dir.display());
+    }
+    println!("Backend dir:   {}", bundle.backend_dir.display());
+    println!("Python:        {}", bundle.python.display());
+    println!("Host:          {}", host);
+    println!("Port:          {}", port);
+    if let Some(dir) = dirs::config_dir() {
+        println!(
+            "Log:           {}",
+            dir.join("magelab").join("backend.log").display()
+        );
+    }
 }
 
 async fn cmd_status(config: &Config) -> Result<()> {

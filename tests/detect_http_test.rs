@@ -1,4 +1,5 @@
 use magelab_cli::detect;
+use magelab_cli::detect::BackendBundleKind;
 use serde_json::json;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -182,6 +183,86 @@ fn test_find_magelab_home_empty_override_returns_none() {
     let _result = detect::find_magelab_home(Some(""));
     // We can't assert None because MAGELAB_HOME or sibling paths might exist
     // But at least it shouldn't panic
+}
+
+#[test]
+fn test_find_backend_bundle_dev_repo() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let backend_dir = dir.path().join("backend");
+    let venv_bin = backend_dir.join(".venv").join("bin");
+    std::fs::create_dir_all(&venv_bin).unwrap();
+    std::fs::write(backend_dir.join("main.py"), "").unwrap();
+    std::fs::write(venv_bin.join("python"), "").unwrap();
+
+    let bundle = detect::find_backend_bundle(Some(dir.path().to_str().unwrap()))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(bundle.kind, BackendBundleKind::DevRepo);
+    assert_eq!(bundle.root, dir.path().to_path_buf());
+    assert_eq!(bundle.api_dir, None);
+    assert_eq!(bundle.backend_dir, backend_dir);
+    assert_eq!(bundle.python, venv_bin.join("python"));
+}
+
+#[test]
+fn test_find_backend_bundle_packaged_api_root() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let api_dir = dir.path().join("bin").join("api");
+    let backend_dir = api_dir.join("backend");
+    let python_dir = api_dir.join("python").join("bin");
+    std::fs::create_dir_all(&backend_dir).unwrap();
+    std::fs::create_dir_all(&python_dir).unwrap();
+    std::fs::write(backend_dir.join("main.py"), "").unwrap();
+    std::fs::write(python_dir.join("python3"), "").unwrap();
+
+    let bundle = detect::find_backend_bundle(Some(dir.path().to_str().unwrap()))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(bundle.kind, BackendBundleKind::PackagedApp);
+    assert_eq!(bundle.api_dir, Some(api_dir.clone()));
+    assert_eq!(bundle.backend_dir, backend_dir);
+    assert_eq!(bundle.python, python_dir.join("python3"));
+}
+
+#[test]
+fn test_find_backend_bundle_macos_app_root_shape() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let app_root = dir.path().join("magelab.app");
+    let api_dir = app_root
+        .join("Contents")
+        .join("Resources")
+        .join("bin")
+        .join("api");
+    let backend_dir = api_dir.join("backend");
+    let python_dir = api_dir.join("python").join("bin");
+    std::fs::create_dir_all(&backend_dir).unwrap();
+    std::fs::create_dir_all(&python_dir).unwrap();
+    std::fs::write(backend_dir.join("main.py"), "").unwrap();
+    std::fs::write(python_dir.join("python3"), "").unwrap();
+
+    let bundle = detect::find_backend_bundle(Some(app_root.to_str().unwrap()))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(bundle.kind, BackendBundleKind::PackagedApp);
+    assert_eq!(bundle.api_dir, Some(api_dir));
+}
+
+#[test]
+fn test_find_backend_bundle_rejects_main_py_override() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let backend_dir = dir.path().join("backend");
+    std::fs::create_dir_all(&backend_dir).unwrap();
+    let main_py = backend_dir.join("main.py");
+    std::fs::write(&main_py, "").unwrap();
+
+    let err = detect::find_backend_bundle(Some(main_py.to_str().unwrap()))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("not backend/main.py"));
 }
 
 #[tokio::test]
