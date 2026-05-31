@@ -46,7 +46,7 @@ fn test_setup_pi_offers_install_when_npm_available() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
-    let pnpm = bin_dir.join(if cfg!(windows) { "pnpm.bat" } else { "pnpm" });
+    let pnpm = bin_dir.join(if cfg!(windows) { "pnpm.cmd" } else { "pnpm" });
     fs::write(
         &pnpm,
         if cfg!(windows) {
