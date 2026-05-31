@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::detect;
@@ -16,6 +17,50 @@ const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 const EXT_COMMANDS_TS: &str = include_str!("../extension/src/commands.ts");
 const EXT_VALIDATION_TS: &str = include_str!("../extension/src/validation.ts");
 const EXT_PROTOCOL_TS: &str = include_str!("../extension/src/protocol.ts");
+
+fn command_path(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::Path;
+
+        let path = Path::new(name);
+        if path.extension().is_some() {
+            return PathBuf::from(name);
+        }
+
+        let path_ext = std::env::var_os("PATHEXT")
+            .and_then(|v| v.into_string().ok())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+        let extensions: Vec<String> = path_ext
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(|ext| ext.to_ascii_lowercase())
+            .collect();
+
+        if let Some(paths) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&paths) {
+                for ext in &extensions {
+                    let candidate = dir.join(format!("{name}{ext}"));
+                    if candidate.exists() {
+                        return candidate;
+                    }
+                }
+            }
+        }
+    }
+
+    PathBuf::from(name)
+}
+
+fn command_succeeds(name: &str, args: &[&str]) -> bool {
+    std::process::Command::new(command_path(name))
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
 pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let home =
@@ -38,34 +83,15 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     }
 
     // Check if Pi is installed, offer to install if not
-    let pi_installed = std::process::Command::new("pi")
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let pi_installed = command_succeeds("pi", &["--version"]);
 
     if !pi_installed {
         println!("Pi coding agent is not installed.");
         println!();
 
         // Check if npm/pnpm is available
-        let has_pnpm = std::process::Command::new("pnpm")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-
-        let has_npm = std::process::Command::new("npm")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let has_pnpm = command_succeeds("pnpm", &["--version"]);
+        let has_npm = command_succeeds("npm", &["--version"]);
 
         if !has_pnpm && !has_npm {
             println!("Neither pnpm nor npm found. Install Node.js first:");
@@ -93,7 +119,7 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         }
 
         let sp = ui::spinner("Installing Pi coding agent...");
-        let pi_ok = std::process::Command::new(pkg_mgr)
+        let pi_ok = std::process::Command::new(command_path(pkg_mgr))
             .args(["install", "-g", "@mariozechner/pi-coding-agent"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
