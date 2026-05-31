@@ -1,6 +1,8 @@
 # MageLab CLI
 
-Infrastructure management tool for MageLab. Handles authentication, backend detection/launch, account management, device management, and configuration.
+Infrastructure management tool for MageLab. Handles CLI authentication, headless backend detection and launch, account management, device management, and configuration.
+
+The installed binary is `mage`.
 
 ## Prerequisites
 
@@ -11,54 +13,135 @@ Infrastructure management tool for MageLab. Handles authentication, backend dete
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
-cargo install --path .         # Install `magelab` binary to ~/.cargo/bin
+cargo install --path .         # Install `mage` binary to ~/.cargo/bin
 ```
 
 ## Running
 
 ```bash
-magelab --help                 # Show all commands
-magelab version                # Print version
+mage --help                    # Show all commands
+mage version                   # Print version
 
 # Authentication
-magelab login                  # Browser-based OAuth login (default)
-magelab login --method magic   # Email magic-code login
-magelab login --status         # Show current auth status
-magelab logout                 # Clear stored credentials
-magelab auth token             # Print JWT to stdout (for piping)
+mage login                     # Browser-based OAuth login (default)
+mage login --method magic      # Email magic-code login
+mage login --status            # Show current auth status
+mage logout                    # Clear stored credentials
+mage auth token                # Print JWT to stdout (for piping)
 
 # Connection management
-magelab connect                # Auto-resolve: local → relay → remote
-magelab connect --json         # Output as JSON (for programmatic use)
-magelab connect --local        # Force local backend only
-magelab connect --relay        # Force relay mode only
-magelab connect --remote       # Force remote REST mode only
-magelab connect --no-launch    # Don't auto-launch backend
+mage connect                   # Auto-resolve: local → launch → relay → remote
+mage connect --json            # Output as JSON (for programmatic use)
+mage connect --local           # Force local backend only
+mage connect --relay           # Force relay mode only
+mage connect --remote          # Force remote REST mode only
+mage connect --no-launch       # Don't auto-launch backend
+mage connect --url <http-url>  # Probe a running backend without changing config
+mage connect --ws <ws-url>     # Probe a running WebSocket backend
 
 # Backend management
-magelab launch                 # Start headless backend
-magelab launch --wait          # Start and block until healthy
-magelab status                 # Show backend health and auth info
+mage launch                    # Start headless backend
+mage launch --wait             # Start and block until healthy
+mage launch --dry-run          # Print resolved backend bundle and command inputs
+mage launch --host 0.0.0.0     # Bind beyond localhost (requires network care)
+mage launch --port 8787        # Override local_url port for this launch
+mage status                    # Show backend health and auth info
 
 # Device management
-magelab devices                # List online relay devices
-magelab devices --json         # Output as JSON
-magelab devices bind <id>      # Bind to a specific device
-magelab devices detach         # Unbind from current device
+mage devices                   # List online relay devices
+mage devices --json            # Output as JSON
+mage devices bind <id>         # Bind to a specific device
+mage devices detach            # Unbind from current device
 
 # Account info (requires auth)
-magelab models                 # List available models
-magelab usage                  # Show token usage summary
-magelab balance                # Show account credit balance
+mage models                    # List available models
+mage usage                     # Show token usage summary
+mage balance                   # Show account credit balance
 
 # API key management
-magelab keys list              # List API keys
-magelab keys create            # Create a new API key
-magelab keys revoke <id>       # Revoke an API key
+mage keys list                 # List API keys
+mage keys create               # Create a new API key
+mage keys revoke <id>          # Revoke an API key
 
 # Configuration
-magelab config                 # Show current config and file path
-magelab config set <key> <val> # Set a config value
+mage config                    # Show current config and file path
+mage config set <key> <val>    # Set a config value
+```
+
+## Login, Launch, and Connect
+
+These commands intentionally do different jobs:
+
+- `mage login` signs the CLI into the MageLab cloud account. It does not start the desktop app or backend.
+- `mage launch` starts the backend headlessly. It does not open the desktop UI and does not perform interactive sign-in.
+- `mage connect` finds a usable backend connection, optionally launching a local backend when allowed.
+
+Recommended authenticated headless flow:
+
+```bash
+mage login
+mage launch --wait
+mage connect
+```
+
+`mage launch --wait` starts the backend, waits for health, and then pushes available vault secrets to the running backend. If you launch first and sign in afterward, push secrets explicitly:
+
+```bash
+mage launch --wait
+mage login
+mage vault push
+```
+
+To connect to an already-running backend on a non-default port or host:
+
+```bash
+mage connect --url http://127.0.0.1:8787
+mage connect --ws ws://127.0.0.1:8787/ws
+```
+
+For remote machines, the backend must be launched with a reachable bind address, such as `--host 0.0.0.0`, and firewall plus browser origin settings must allow the client.
+
+### Headless Backend Discovery
+
+`mage launch` supports both development and packaged layouts.
+
+Development repo layout:
+
+```text
+<mage-lab>/backend/main.py
+<mage-lab>/backend/.venv/bin/python
+```
+
+Packaged API layout:
+
+```text
+<install-root>/bin/api/backend/main.py
+<install-root>/bin/api/python/bin/python3
+```
+
+macOS app bundle layout:
+
+```text
+/Applications/magelab.app/Contents/Resources/bin/api/backend/main.py
+/Applications/magelab.app/Contents/Resources/bin/api/python/bin/python3
+```
+
+Discovery order:
+
+1. `MAGELAB_API_DIR`
+2. `MAGELAB_HOME`
+3. `magelab_home` from `~/.config/magelab/cli.toml`
+4. nearby development layouts
+5. packaged platform defaults
+
+`magelab_home` should point to an install root or bundled API directory, not directly to `backend/main.py`.
+
+Examples:
+
+```bash
+MAGELAB_HOME=/path/to/mage-lab mage launch --wait
+MAGELAB_API_DIR=/Applications/magelab.app/Contents/Resources/bin/api mage launch --dry-run
+mage config set magelab_home /Applications/magelab.app
 ```
 
 ## Pi Extension
@@ -69,10 +152,11 @@ The CLI includes `@magelab/agent`, a [Pi coding agent](https://github.com/badlog
 
 ```bash
 # 1. One command installs everything (Pi + extension + dependencies)
-magelab setup-pi
+mage setup-pi
 
-# 2. Start MageLab backend (if not already running)
-magelab launch --wait
+# 2. Sign in and start MageLab backend (if not already running)
+mage login
+mage launch --wait
 
 # 3. Start Pi — MageLab tools auto-register
 pi
@@ -103,13 +187,13 @@ ln -s "$(pwd)/extension" ~/.pi/agent/extensions/magelab-agent
 ### Managing the Extension
 
 ```bash
-magelab setup-pi               # Install/reinstall
-magelab setup-pi --uninstall   # Remove extension
+mage setup-pi                  # Install/reinstall
+mage setup-pi --uninstall      # Remove extension
 ```
 
 ### How It Works
 
-On Pi startup, the extension calls `magelab connect --json --no-launch` to find the backend, opens a WebSocket, and registers all non-native backend tools with Pi. Tools like `read_file`, `write_file`, and `run_bash` are skipped (Pi handles those natively).
+On Pi startup, the extension calls `mage connect --json --no-launch` to find an already-running backend, opens a WebSocket, and registers all non-native backend tools with Pi. Tools like `read_file`, `write_file`, and `run_bash` are skipped (Pi handles those natively).
 
 ## Configuration
 
@@ -119,10 +203,12 @@ Config file: `~/.config/magelab/cli.toml`
 gateway_url = "https://api.magelab.ai"
 local_url = "http://127.0.0.1:11115"
 default_model = "qwen-3-235b-a22b-instruct-2507"
-api_key = "mage_..."
+magelab_home = "/Applications/magelab.app"
 ```
 
 Credentials are stored in the system keychain (macOS Keychain, Linux secret service, Windows Credential Manager) with a file-based fallback at `~/.config/magelab/credentials.json`.
+
+Plaintext `api_key` in `cli.toml` is deprecated. Prefer the desktop app vault or `MAGELAB_API_KEY`.
 
 ## Testing
 
@@ -131,9 +217,9 @@ Credentials are stored in the system keychain (macOS Keychain, Linux secret serv
 The `tests/` directory contains Rust integration tests covering config, credentials, connection resolution, backend detection, remote client HTTP calls, OAuth, and CLI commands.
 
 ```bash
-cargo test                     # Run all tests
-cargo test <test_name>         # Run a specific test
-cargo test -- --nocapture      # Show println output
+cargo test -p magelab-cli                     # Run all tests from the workspace root
+cargo test -p magelab-cli <test_name>         # Run a specific test
+cargo test -p magelab-cli -- --nocapture      # Show println output
 ```
 
 Key test files:
@@ -144,11 +230,9 @@ Key test files:
 | `config_test.rs`, `config_set_test.rs` | Config loading, saving, `config set` |
 | `credentials_test.rs` | Credential storage round-trip |
 | `connect_test.rs`, `connect_resolve_test.rs` | Connection resolution logic |
-| `connection_mode_test.rs` | `--local` / `--relay` / `--remote` flag handling |
 | `detect_test.rs`, `detect_http_test.rs` | Backend health checks, headless launch, device discovery (uses `wiremock`) |
 | `remote_test.rs`, `remote_http_test.rs` | `RemoteClient` REST calls (uses `wiremock`) |
 | `oauth_test.rs`, `login_logout_test.rs` | OAuth PKCE flow, login/logout state transitions |
-| `messages_test.rs` | WebSocket protocol message serialization |
 | `settings_test.rs` | Runtime settings parsing |
 
 ### Login/Logout E2E Script
@@ -179,16 +263,18 @@ Key test files:
 ## Linting and Formatting
 
 ```bash
-cargo check                    # Type check
-cargo clippy -- -D warnings    # Lint (warnings are errors in CI)
-cargo fmt --check              # Check formatting
-cargo fmt                      # Auto-format
+cargo check -p magelab-cli                    # Type check from the workspace root
+cargo clippy -p magelab-cli -- -D warnings    # Lint (warnings are errors in CI)
+cargo fmt --check                             # Check formatting
+cargo fmt                                     # Auto-format
 ```
 
 ## Connection Modes
 
 The CLI resolves connections in priority order:
 
-1. **Local** — connects to a MageLab backend running at `localhost:11115` (full tool use)
-2. **Relay** — tunnels through the gateway to a user's device (full tool use)
-3. **Remote** — REST calls to `api.magelab.ai` (chat only, requires API key)
+1. **Explicit local URL** — probes `mage connect --url` or `mage connect --ws` without mutating config
+2. **Configured local** — connects to the backend at `local_url`, default `http://127.0.0.1:11115`
+3. **Headless launch** — starts a local backend unless `--no-launch` was set
+4. **Relay** — tunnels through the gateway to a user's device (full tool use)
+5. **Remote** — REST calls to `api.magelab.ai` (chat only, requires auth/API key)
