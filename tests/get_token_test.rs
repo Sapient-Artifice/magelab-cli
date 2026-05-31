@@ -11,6 +11,42 @@
 use magelab_cli::auth;
 use magelab_cli::config::Config;
 use serial_test::serial;
+use std::ffi::OsString;
+use tempfile::TempDir;
+
+struct EnvGuard {
+    vars: Vec<(&'static str, Option<OsString>)>,
+    _tmp: TempDir,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.vars {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
+fn isolate_auth_state() -> EnvGuard {
+    let tmp = TempDir::new().unwrap();
+    let vars = vec![
+        ("HOME", std::env::var_os("HOME")),
+        ("USERPROFILE", std::env::var_os("USERPROFILE")),
+        ("XDG_CONFIG_HOME", std::env::var_os("XDG_CONFIG_HOME")),
+        (
+            "MAGELAB_SKIP_KEYCHAIN_TESTS",
+            std::env::var_os("MAGELAB_SKIP_KEYCHAIN_TESTS"),
+        ),
+    ];
+    std::env::set_var("HOME", tmp.path());
+    std::env::set_var("USERPROFILE", tmp.path());
+    std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("config"));
+    std::env::set_var("MAGELAB_SKIP_KEYCHAIN_TESTS", "1");
+    EnvGuard { vars, _tmp: tmp }
+}
 
 /// Config with gateway pointing nowhere (refresh will fail).
 fn test_config() -> Config {
@@ -31,8 +67,9 @@ async fn test_get_token_returns_something_when_env_var_set() {
     if skip_in_ci() {
         return;
     }
-    std::env::set_var("MAGELAB_API_KEY", "mage_test_env_key");
+    let _env = isolate_auth_state();
     let config = test_config();
+    std::env::set_var("MAGELAB_API_KEY", "mage_test_env_key");
 
     // Should succeed — either from keychain creds or env var fallback
     let result = auth::get_token(&config).await;
@@ -47,8 +84,9 @@ async fn test_get_token_env_var_empty_is_not_valid() {
     if skip_in_ci() {
         return;
     }
-    std::env::set_var("MAGELAB_API_KEY", "");
+    let _env = isolate_auth_state();
     let config = test_config();
+    std::env::set_var("MAGELAB_API_KEY", "");
 
     let result = auth::get_token(&config).await;
 
@@ -71,6 +109,7 @@ async fn test_get_token_error_message_mentions_login() {
     if skip_in_ci() {
         return;
     }
+    let _env = isolate_auth_state();
     // Remove env var — if no keychain creds either, should get helpful error
     std::env::remove_var("MAGELAB_API_KEY");
     let config = test_config();

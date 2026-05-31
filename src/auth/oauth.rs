@@ -237,7 +237,10 @@ async fn login_magic_auth(gateway_url: &str) -> Result<Credentials> {
 
     let sp = crate::ui::spinner(&format!("Sending code to {email}..."));
     let resp = http
-        .post(format!("{}/magic-auth", core_auth::auth_base_url(gateway_url)))
+        .post(format!(
+            "{}/magic-auth",
+            core_auth::auth_base_url(gateway_url)
+        ))
         .json(&serde_json::json!({
             "email": email,
             "client_id": cid,
