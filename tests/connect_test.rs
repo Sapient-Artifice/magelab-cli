@@ -55,11 +55,22 @@ fn test_connect_result_serializes_none() {
 #[test]
 fn test_ws_to_http_url() {
     assert_eq!(
-        magelab_cli::connect::ws_to_http_url("ws://127.0.0.1:8787/ws"),
+        magelab_cli::connect::direct_ws_to_http_url("ws://127.0.0.1:8787/ws").unwrap(),
         "http://127.0.0.1:8787"
     );
     assert_eq!(
-        magelab_cli::connect::ws_to_http_url("wss://example.com/ws"),
+        magelab_cli::connect::direct_ws_to_http_url("wss://example.com/ws").unwrap(),
         "https://example.com"
     );
+}
+
+#[test]
+fn test_direct_ws_to_http_url_rejects_relay_url() {
+    let err = magelab_cli::connect::direct_ws_to_http_url(
+        "wss://api.magelab.ai/v1/realtime/portal/ws?ws_ticket=abc",
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("directly to a backend /ws endpoint"));
 }

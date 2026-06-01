@@ -262,10 +262,12 @@ Suggested flags:
 
 ```text
 mage launch --host 127.0.0.1 --port 11115
-mage launch --host 0.0.0.0 --port 8787
+mage launch --host 0.0.0.0 --port 8787 --allow-network
 ```
 
 The port should continue to default from `config.local_url` for backward compatibility.
+
+Binding to anything other than localhost should require `--allow-network` and print a warning because the backend exposes full tool access.
 
 ## Auth and Secret Handoff
 
@@ -344,6 +346,7 @@ This would make installation issues obvious without requiring users to read the 
 Unit tests:
 
 - Resolves dev layout: `<root>/backend/main.py`.
+- Rejects dev-like directories without a repository sentinel.
 - Resolves packaged API layout: `<root>/bin/api/backend/main.py`.
 - Resolves macOS `.app` root to `Contents/Resources/bin/api`.
 - Resolves Linux root `/usr/lib/magelab` to `bin/api`.
@@ -377,6 +380,8 @@ mage launch --wait
 ```
 
 The main behavioral change is that packaged installs become first-class launch targets and use the packaged Python runtime instead of system Python.
+
+Development repo discovery remains supported, but it now requires a sentinel such as `.git`, `pyproject.toml`, `backend/pyproject.toml`, or `package.json` in addition to `backend/main.py`.
 
 ## Recommendation
 

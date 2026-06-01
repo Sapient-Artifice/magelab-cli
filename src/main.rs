@@ -87,6 +87,9 @@ enum Commands {
         /// Print the resolved backend launch command without spawning it
         #[arg(long)]
         dry_run: bool,
+        /// Allow binding the full-access backend to a non-localhost interface
+        #[arg(long)]
+        allow_network: bool,
     },
     /// Show backend health and connection info
     Status,
@@ -254,7 +257,8 @@ async fn main() -> Result<()> {
             host,
             port,
             dry_run,
-        } => cmd_launch(&mut config, wait, &host, port, dry_run).await,
+            allow_network,
+        } => cmd_launch(&mut config, wait, &host, port, dry_run, allow_network).await,
         Commands::Status => cmd_status(&config).await,
         Commands::Devices { action, json } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access devices")?;
@@ -397,11 +401,11 @@ async fn cmd_connect(
     ws: Option<String>,
 ) -> Result<()> {
     let has_url_override = url.is_some() || ws.is_some();
-    let local_url = ws
-        .as_deref()
-        .map(connect::ws_to_http_url)
-        .or(url)
-        .unwrap_or_else(|| config.local_url.clone());
+    let local_url = if let Some(ws_url) = ws {
+        connect::direct_ws_to_http_url(&ws_url)?
+    } else {
+        url.unwrap_or_else(|| config.local_url.clone())
+    };
 
     let result = if local {
         if detect::check_backend_health(&local_url).await {
@@ -490,7 +494,10 @@ async fn cmd_launch(
     host: &str,
     port: Option<u16>,
     dry_run: bool,
+    allow_network: bool,
 ) -> Result<()> {
+    validate_launch_host(host, allow_network)?;
+
     let bundle = detect::find_backend_bundle(config.magelab_home.as_deref())?.ok_or_else(|| {
         anyhow::anyhow!("MageLab backend bundle not found. Set magelab_home or MAGELAB_API_DIR.")
     })?;
@@ -502,13 +509,19 @@ async fn cmd_launch(
         return Ok(());
     }
 
-    let child = detect::launch_backend_headless(&bundle, host, port, config.relay_enabled)?;
-    // Detach the child so it outlives this CLI invocation
-    std::mem::forget(child);
+    let mut child = detect::launch_backend_headless(&bundle, host, port, config.relay_enabled)?;
 
     if wait {
         let sp = ui::spinner("Starting backend...");
-        detect::wait_for_backend(&wait_url, std::time::Duration::from_secs(30)).await?;
+        if let Err(e) =
+            detect::wait_for_backend(&wait_url, std::time::Duration::from_secs(30)).await
+        {
+            child.kill().ok();
+            child.wait().ok();
+            return Err(e);
+        }
+        // Detach the child so it outlives this CLI invocation after health succeeds.
+        std::mem::forget(child);
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", wait_url));
 
@@ -524,6 +537,8 @@ async fn cmd_launch(
             }
         }
     } else {
+        // Fire-and-forget launch intentionally detaches immediately.
+        std::mem::forget(child);
         ui::success("Backend launched");
         ui::label("check", "mage status");
     }
@@ -532,6 +547,23 @@ async fn cmd_launch(
         if let Some(uid) = &creds.user_id {
             analytics::track_activation(uid, "launch", config).await;
         }
+    }
+
+    Ok(())
+}
+
+fn validate_launch_host(host: &str, allow_network: bool) -> Result<()> {
+    let local = matches!(host, "127.0.0.1" | "localhost" | "::1");
+    if !local && !allow_network {
+        anyhow::bail!(
+            "Refusing to bind MageLab backend to {host}. This exposes full tool access to the network. Re-run with --allow-network if this is intentional."
+        );
+    }
+
+    if !local {
+        eprintln!(
+            "Warning: binding to {host} exposes the MageLab backend (full tool access) to your network."
+        );
     }
 
     Ok(())

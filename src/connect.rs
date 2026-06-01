@@ -34,6 +34,25 @@ pub fn ws_to_http_url(ws_url: &str) -> String {
     }
 }
 
+/// Validate and convert a direct backend WebSocket URL for local health checks.
+///
+/// This intentionally rejects relay/gateway-style paths and query strings. The
+/// connect --ws flag is only for direct backend endpoints such as
+/// ws://127.0.0.1:8787/ws.
+pub fn direct_ws_to_http_url(ws_url: &str) -> Result<String> {
+    let parsed = url::Url::parse(ws_url)?;
+    match parsed.scheme() {
+        "ws" | "wss" => {}
+        _ => anyhow::bail!("--ws must use a ws:// or wss:// URL"),
+    }
+
+    if parsed.path() != "/ws" || parsed.query().is_some() || parsed.fragment().is_some() {
+        anyhow::bail!("--ws must point directly to a backend /ws endpoint");
+    }
+
+    Ok(ws_to_http_url(ws_url))
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConnectResult {
     pub url: Option<String>,
@@ -69,16 +88,15 @@ pub async fn resolve_with_local_url(
     if !no_launch {
         if let Some(bundle) = detect::find_backend_bundle(config.magelab_home.as_deref())? {
             let port = detect::port_from_url(local_url);
-            if let Ok(child) =
+            if let Ok(mut child) =
                 detect::launch_backend_headless(&bundle, "127.0.0.1", port, config.relay_enabled)
             {
-                // Detach the child so it outlives this CLI invocation
-                // without leaving a zombie (Unix) or being killed (Windows).
-                std::mem::forget(child);
                 if detect::wait_for_backend(local_url, Duration::from_secs(15))
                     .await
                     .is_ok()
                 {
+                    // Detach only after health succeeds so failed launches are cleaned up.
+                    std::mem::forget(child);
                     return Ok(ConnectResult {
                         url: Some(to_ws_url(local_url)),
                         token: None,
@@ -86,6 +104,8 @@ pub async fn resolve_with_local_url(
                         model: Some(config.default_model.clone()),
                     });
                 }
+                child.kill().ok();
+                child.wait().ok();
             }
         }
     }

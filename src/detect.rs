@@ -94,77 +94,19 @@ pub async fn check_backend_health(local_url: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Find the mage-lab installation directory
-#[allow(dead_code)]
-pub fn find_magelab_home(config_override: Option<&str>) -> Option<PathBuf> {
-    // 1. MAGELAB_HOME env var (highest priority)
-    if let Ok(home) = std::env::var("MAGELAB_HOME") {
-        return Some(PathBuf::from(home));
-    }
-
-    // 2. Config file override (user explicitly set magelab_home)
-    if let Some(override_path) = config_override {
-        if !override_path.is_empty() {
-            let p = PathBuf::from(override_path);
-            if p.join("backend").join("main.py").exists() {
-                return Some(p);
-            }
-        }
-    }
-
-    // 3. Sibling directory relative to CLI binary (multiple depths for dev layouts)
-    if let Ok(exe) = std::env::current_exe() {
-        // Try 2, 3, and 4 levels up to handle:
-        //   - cargo install: ~/.cargo/bin/mage (2 up = ~, look for ~/mage-lab)
-        //   - cargo run from repo: magelab-cli/target/debug/mage (3 up = parent of magelab-cli)
-        //   - monorepo cargo run: monorepo/magelab-cli/target/debug/mage (4 up = monorepo parent)
-        let mut dir = exe.parent().map(|p| p.to_path_buf());
-        for _ in 0..4 {
-            dir = dir.and_then(|d| d.parent().map(|p| p.to_path_buf()));
-            if let Some(ref d) = dir {
-                let candidate = d.join("mage-lab");
-                if candidate.join("backend").join("main.py").exists() {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-
-    // 3b. Sibling directory relative to current working directory
-    //     Handles: user is in magelab-cli/ and ../mage-lab/ exists
-    if let Ok(cwd) = std::env::current_dir() {
-        // Check cwd itself (if user is inside mage-lab/)
-        if cwd.join("backend").join("main.py").exists() {
-            return Some(cwd);
-        }
-        // Check sibling: ../mage-lab/
-        if let Some(parent) = cwd.parent() {
-            let sibling = parent.join("mage-lab");
-            if sibling.join("backend").join("main.py").exists() {
-                return Some(sibling);
-            }
-        }
-    }
-
-    // 4. Platform-specific default paths
-    platform_default_paths()
-        .into_iter()
-        .find(|path| path.join("backend").join("main.py").exists())
-}
-
 /// Find a launchable backend bundle for either a dev repo or packaged app.
 pub fn find_backend_bundle(config_override: Option<&str>) -> Result<Option<BackendBundle>> {
     if let Ok(api_dir) = std::env::var("MAGELAB_API_DIR") {
-        return Ok(resolve_backend_bundle_path(Path::new(&api_dir))?);
+        return resolve_explicit_backend_bundle_path("MAGELAB_API_DIR", Path::new(&api_dir));
     }
 
     if let Ok(home) = std::env::var("MAGELAB_HOME") {
-        return Ok(resolve_backend_bundle_path(Path::new(&home))?);
+        return resolve_explicit_backend_bundle_path("MAGELAB_HOME", Path::new(&home));
     }
 
     if let Some(override_path) = config_override {
         if !override_path.is_empty() {
-            return Ok(resolve_backend_bundle_path(Path::new(override_path))?);
+            return resolve_explicit_backend_bundle_path("magelab_home", Path::new(override_path));
         }
     }
 
@@ -181,6 +123,24 @@ pub fn find_backend_bundle(config_override: Option<&str>) -> Result<Option<Backe
     }
 
     Ok(None)
+}
+
+fn resolve_explicit_backend_bundle_path(label: &str, path: &Path) -> Result<Option<BackendBundle>> {
+    if !path.exists() {
+        anyhow::bail!(
+            "{} points to a path that does not exist: {}",
+            label,
+            path.display()
+        );
+    }
+
+    resolve_backend_bundle_path(path)?.map(Some).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{} does not contain a MageLab backend bundle: {}",
+            label,
+            path.display()
+        )
+    })
 }
 
 fn resolve_backend_bundle_path(path: &Path) -> Result<Option<BackendBundle>> {
@@ -209,7 +169,7 @@ fn resolve_backend_bundle_path(path: &Path) -> Result<Option<BackendBundle>> {
 
 fn resolve_dev_repo_bundle(root: &Path) -> Option<BackendBundle> {
     let backend_dir = root.join("backend");
-    if !backend_dir.join("main.py").exists() {
+    if !is_dev_repo_root(root, &backend_dir) {
         return None;
     }
 
@@ -220,6 +180,14 @@ fn resolve_dev_repo_bundle(root: &Path) -> Option<BackendBundle> {
         python: dev_python(&backend_dir),
         backend_dir,
     })
+}
+
+fn is_dev_repo_root(root: &Path, backend_dir: &Path) -> bool {
+    backend_dir.join("main.py").exists()
+        && (root.join(".git").exists()
+            || root.join("pyproject.toml").exists()
+            || backend_dir.join("pyproject.toml").exists()
+            || root.join("package.json").exists())
 }
 
 fn resolve_packaged_api_bundle(api_dir: &Path) -> Option<BackendBundle> {
@@ -371,11 +339,6 @@ pub fn port_from_url(url: &str) -> u16 {
         .ok()
         .and_then(|u| u.port())
         .unwrap_or(11115)
-}
-
-#[allow(dead_code)]
-pub fn find_python(backend_dir: &Path) -> String {
-    dev_python(backend_dir).to_string_lossy().into()
 }
 
 fn dev_python(backend_dir: &Path) -> PathBuf {

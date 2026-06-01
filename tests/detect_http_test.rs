@@ -153,44 +153,12 @@ async fn test_get_ws_ticket_missing_field() {
 }
 
 #[test]
-fn test_find_magelab_home_config_override() {
-    // Config override must point to a real mage-lab directory (with backend/main.py)
-    let dir = tempfile::TempDir::new().unwrap();
-    let backend_dir = dir.path().join("backend");
-    std::fs::create_dir_all(&backend_dir).unwrap();
-    std::fs::write(backend_dir.join("main.py"), "").unwrap();
-
-    let result = detect::find_magelab_home(Some(dir.path().to_str().unwrap()));
-    assert_eq!(result, Some(dir.path().to_path_buf()));
-}
-
-#[test]
-fn test_find_magelab_home_config_override_nonexistent_returns_none() {
-    // A config override pointing to a nonexistent path should not be accepted
-    let result = detect::find_magelab_home(Some("/nonexistent/magelab/path"));
-    // May still return Some if MAGELAB_HOME or sibling paths exist, but the
-    // override itself should not be returned for a nonexistent path
-    assert_ne!(
-        result,
-        Some(std::path::PathBuf::from("/nonexistent/magelab/path"))
-    );
-}
-
-#[test]
-fn test_find_magelab_home_empty_override_returns_none() {
-    // Empty override should not be treated as a valid path
-    // (when no other paths exist either)
-    let _result = detect::find_magelab_home(Some(""));
-    // We can't assert None because MAGELAB_HOME or sibling paths might exist
-    // But at least it shouldn't panic
-}
-
-#[test]
 fn test_find_backend_bundle_dev_repo() {
     let dir = tempfile::TempDir::new().unwrap();
     let backend_dir = dir.path().join("backend");
     let venv_bin = backend_dir.join(".venv").join("bin");
     std::fs::create_dir_all(&venv_bin).unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
     std::fs::write(backend_dir.join("main.py"), "").unwrap();
     std::fs::write(venv_bin.join("python"), "").unwrap();
 
@@ -203,6 +171,20 @@ fn test_find_backend_bundle_dev_repo() {
     assert_eq!(bundle.api_dir, None);
     assert_eq!(bundle.backend_dir, backend_dir);
     assert_eq!(bundle.python, venv_bin.join("python"));
+}
+
+#[test]
+fn test_find_backend_bundle_rejects_dev_repo_without_sentinel() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let backend_dir = dir.path().join("backend");
+    std::fs::create_dir_all(&backend_dir).unwrap();
+    std::fs::write(backend_dir.join("main.py"), "").unwrap();
+
+    let err = detect::find_backend_bundle(Some(dir.path().to_str().unwrap()))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("does not contain a MageLab backend bundle"));
 }
 
 #[test]
@@ -248,6 +230,15 @@ fn test_find_backend_bundle_macos_app_root_shape() {
 
     assert_eq!(bundle.kind, BackendBundleKind::PackagedApp);
     assert_eq!(bundle.api_dir, Some(api_dir));
+}
+
+#[test]
+fn test_find_backend_bundle_explicit_missing_path_errors() {
+    let err = detect::find_backend_bundle(Some("/nonexistent/magelab/path"))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("does not exist"));
 }
 
 #[test]

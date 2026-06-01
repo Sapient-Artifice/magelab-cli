@@ -43,7 +43,8 @@ mage connect --ws <ws-url>     # Probe a running WebSocket backend
 mage launch                    # Start headless backend
 mage launch --wait             # Start and block until healthy
 mage launch --dry-run          # Print resolved backend bundle and command inputs
-mage launch --host 0.0.0.0     # Bind beyond localhost (requires network care)
+mage launch --host 0.0.0.0 --allow-network
+                               # Bind beyond localhost (exposes full tool access)
 mage launch --port 8787        # Override local_url port for this launch
 mage status                    # Show backend health and auth info
 
@@ -99,7 +100,7 @@ mage connect --url http://127.0.0.1:8787
 mage connect --ws ws://127.0.0.1:8787/ws
 ```
 
-For remote machines, the backend must be launched with a reachable bind address, such as `--host 0.0.0.0`, and firewall plus browser origin settings must allow the client.
+For remote machines, the backend must be launched with a reachable bind address, such as `--host 0.0.0.0 --allow-network`, and firewall plus browser origin settings must allow the client. Binding beyond localhost exposes the backend's full tool access to the network, so the CLI requires the explicit `--allow-network` opt-in.
 
 ### Headless Backend Discovery
 
@@ -111,6 +112,8 @@ Development repo layout:
 <mage-lab>/backend/main.py
 <mage-lab>/backend/.venv/bin/python
 ```
+
+Dev repo discovery also requires a repository sentinel such as `.git`, `pyproject.toml`, `backend/pyproject.toml`, or `package.json`. This prevents accidentally launching an unrelated `backend/main.py` found while walking nearby directories.
 
 Packaged API layout:
 
