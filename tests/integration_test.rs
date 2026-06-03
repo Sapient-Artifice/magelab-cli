@@ -39,6 +39,17 @@ fn test_connect_help() {
 }
 
 #[test]
+fn test_launch_help() {
+    Command::cargo_bin("mage")
+        .unwrap()
+        .args(["launch", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--allow-network"));
+}
+
+#[test]
 fn test_config_shows_path() {
     Command::cargo_bin("mage")
         .unwrap()
