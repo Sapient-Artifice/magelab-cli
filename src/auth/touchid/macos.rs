@@ -1,14 +1,10 @@
 use anyhow::{Context, Result};
-use core_foundation::base::{kCFAllocatorDefault, CFType, TCFType};
-use core_foundation::boolean::CFBoolean;
-use core_foundation::data::CFData;
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::dictionary::CFMutableDictionary;
 use core_foundation::string::CFString;
-use security_framework_sys::access_control::*;
-use security_framework_sys::base::{errSecAuthFailed, errSecItemNotFound, errSecSuccess};
+use security_framework_sys::base::{errSecItemNotFound, errSecSuccess};
 use security_framework_sys::item::*;
 use security_framework_sys::keychain_item::*;
-use std::ptr;
 
 const KEYCHAIN_SERVICE: &str = "magelab";
 const KEYCHAIN_ACCOUNT: &str = "refresh-bio";
@@ -86,85 +82,7 @@ unsafe fn base_query() -> CFMutableDictionary<CFString, CFType> {
     query
 }
 
-/// Store a refresh token in a biometric-protected Keychain item
-pub fn store_biometric_item(token: &str) -> Result<()> {
-    // Delete any existing item first (ignore errors)
-    delete_biometric_item().ok();
-
-    unsafe {
-        let mut error: *mut core_foundation_sys::error::CFErrorRef = ptr::null_mut();
-        let access_control = SecAccessControlCreateWithFlags(
-            kCFAllocatorDefault,
-            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly as *const _,
-            kSecAccessControlBiometryCurrentSet,
-            &mut error as *mut _ as *mut _,
-        );
-
-        if access_control.is_null() {
-            anyhow::bail!("Failed to create access control for biometric Keychain item");
-        }
-
-        let mut query = base_query();
-        query.add(
-            &CFString::wrap_under_get_rule(kSecValueData),
-            &CFData::from_buffer(token.as_bytes()).as_CFType(),
-        );
-        query.add(
-            &CFString::wrap_under_get_rule(kSecAttrAccessControl),
-            &CFType::wrap_under_create_rule(access_control as *const _),
-        );
-
-        let status = SecItemAdd(query.as_concrete_TypeRef() as _, ptr::null_mut());
-
-        if status != errSecSuccess {
-            anyhow::bail!(
-                "Failed to store biometric Keychain item (OSStatus {})",
-                status
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Load refresh token from biometric-protected Keychain item (triggers Touch ID)
-pub fn load_biometric_item() -> Result<Option<String>> {
-    unsafe {
-        let mut query = base_query();
-        query.add(
-            &CFString::wrap_under_get_rule(kSecReturnData),
-            &CFBoolean::true_value().as_CFType(),
-        );
-
-        let mut result: core_foundation_sys::base::CFTypeRef = ptr::null_mut();
-        let status = SecItemCopyMatching(query.as_concrete_TypeRef() as _, &mut result);
-
-        match status {
-            s if s == errSecSuccess => {
-                if result.is_null() {
-                    return Ok(None);
-                }
-                let data = CFData::wrap_under_create_rule(result as _);
-                let token = String::from_utf8(data.bytes().to_vec())
-                    .context("Biometric Keychain item is not valid UTF-8")?;
-                Ok(Some(token))
-            }
-            s if s == errSecItemNotFound => Ok(None),
-            s if s == errSecAuthFailed => {
-                eprintln!("Touch ID enrollment changed. Please log in again: mage login");
-                Ok(None)
-            }
-            _ => {
-                anyhow::bail!(
-                    "Failed to read biometric Keychain item (OSStatus {})",
-                    status
-                );
-            }
-        }
-    }
-}
-
-/// Delete biometric Keychain item
+/// Delete legacy biometric Keychain item
 pub fn delete_biometric_item() -> Result<()> {
     unsafe {
         let query = base_query();
