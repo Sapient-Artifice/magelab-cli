@@ -11,19 +11,9 @@ use crate::config::Config;
 // Re-export core's Credentials as the CLI's canonical type.
 pub use magelab_core::auth::Credentials;
 
-/// Save credentials with Touch ID biometric storage.
+/// Save credentials to the canonical auth store.
 pub fn save_credentials(creds: &Credentials) -> Result<()> {
     creds.save()?;
-    if let Some(ref rt) = creds.refresh_token {
-        if touchid::is_available() {
-            if let Err(e) = touchid::store_secure(rt) {
-                eprintln!(
-                    "Warning: Could not store credentials in biometric keychain. \
-                     Touch ID refresh will not be available. ({e})"
-                );
-            }
-        }
-    }
     Ok(())
 }
 
@@ -33,36 +23,20 @@ pub(crate) fn save_refreshed_credentials(creds: &Credentials) -> Result<()> {
     Ok(())
 }
 
-/// Clear credentials from keychain/file and biometric items.
+/// Clear credentials from the canonical store and legacy biometric items.
 pub fn clear_credentials() -> Result<()> {
     touchid::clear()?;
     Credentials::clear()?;
     Ok(())
 }
 
-/// Try to get a valid JWT, attempting biometric refresh before regular refresh.
+/// Try to get a valid JWT, refreshing through the canonical credentials.
 pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<String> {
     if let Some(token) = &creds.access_token {
         if creds.is_token_valid() {
             return Some(token.clone());
         }
 
-        // Try biometric-protected refresh token first
-        if let Ok(Some(bio_refresh)) = touchid::load_secure() {
-            if let Ok(mut new_creds) =
-                magelab_core::auth::refresh_token(gateway_url, &bio_refresh).await
-            {
-                if new_creds.refresh_token.is_none() {
-                    new_creds.refresh_token = Some(bio_refresh);
-                }
-                save_refreshed_credentials(&new_creds).ok();
-                if let Some(t) = new_creds.access_token {
-                    return Some(t);
-                }
-            }
-        }
-
-        // Fall back to regular refresh token
         if let Some(refresh) = &creds.refresh_token {
             if let Ok(mut new_creds) = magelab_core::auth::refresh_token(gateway_url, refresh).await
             {
@@ -79,7 +53,7 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
 
 /// Get the best available auth token.
 ///
-/// Fallback chain: JWT → refresh → biometric refresh → vault → MAGELAB_API_KEY env var → error
+/// Fallback chain: JWT → refresh → vault → MAGELAB_API_KEY env var → error
 pub async fn get_token(config: &Config) -> Result<String> {
     let creds = Credentials::load().unwrap_or_default();
     if let Some(token) = get_valid_jwt(&creds, &config.gateway_url).await {
