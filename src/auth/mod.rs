@@ -27,6 +27,12 @@ pub fn save_credentials(creds: &Credentials) -> Result<()> {
     Ok(())
 }
 
+/// Save credentials returned by a refresh operation to the canonical store.
+pub(crate) fn save_refreshed_credentials(creds: &Credentials) -> Result<()> {
+    creds.save()?;
+    Ok(())
+}
+
 /// Clear credentials from keychain/file and biometric items.
 pub fn clear_credentials() -> Result<()> {
     touchid::clear()?;
@@ -43,10 +49,13 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
 
         // Try biometric-protected refresh token first
         if let Ok(Some(bio_refresh)) = touchid::load_secure() {
-            if let Ok(new_creds) =
+            if let Ok(mut new_creds) =
                 magelab_core::auth::refresh_token(gateway_url, &bio_refresh).await
             {
-                save_credentials(&new_creds).ok();
+                if new_creds.refresh_token.is_none() {
+                    new_creds.refresh_token = Some(bio_refresh);
+                }
+                save_refreshed_credentials(&new_creds).ok();
                 if let Some(t) = new_creds.access_token {
                     return Some(t);
                 }
@@ -55,8 +64,12 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
 
         // Fall back to regular refresh token
         if let Some(refresh) = &creds.refresh_token {
-            if let Ok(new_creds) = magelab_core::auth::refresh_token(gateway_url, refresh).await {
-                save_credentials(&new_creds).ok();
+            if let Ok(mut new_creds) = magelab_core::auth::refresh_token(gateway_url, refresh).await
+            {
+                if new_creds.refresh_token.is_none() {
+                    new_creds.refresh_token = Some(refresh.clone());
+                }
+                save_refreshed_credentials(&new_creds).ok();
                 return new_creds.access_token;
             }
         }
