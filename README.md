@@ -122,7 +122,13 @@ default_model = "qwen-3-235b-a22b-instruct-2507"
 api_key = "mage_..."
 ```
 
-Credentials are stored in the system keychain (macOS Keychain, Linux secret service, Windows Credential Manager) with a file-based fallback at `~/.config/magelab/credentials.json`.
+Credentials use the system keychain by default (macOS Keychain, Linux secret service, Windows Credential Manager). Non-keychain modes must be explicit:
+
+- `MAGELAB_AUTH_MODE=keychain` or unset: use the system keychain.
+- `MAGELAB_AUTH_MODE=file`: use `~/.config/magelab/credentials.json` with restrictive file permissions for headless systems.
+- `MAGELAB_AUTH_MODE=env`: read `MAGELAB_ACCESS_TOKEN` and optionally `MAGELAB_REFRESH_TOKEN` without writing credentials.
+
+Production runs should use keychain mode. File mode is intended for headless or CI-style environments where a secure OS credential store is unavailable.
 
 ## Testing
 
