@@ -124,26 +124,6 @@ mod session_cache_tests {
     }
 }
 
-mod refresh_path_tests {
-    use magelab_cli::auth::touchid;
-
-    #[test]
-    fn load_secure_returns_none_when_disabled() {
-        touchid::set_disabled(true);
-        let result = touchid::load_secure().unwrap();
-        assert!(result.is_none());
-        touchid::set_disabled(false);
-    }
-
-    #[test]
-    fn store_secure_is_noop_when_disabled() {
-        touchid::set_disabled(true);
-        let result = touchid::store_secure("test-token");
-        assert!(result.is_ok());
-        touchid::set_disabled(false);
-    }
-}
-
 mod credential_integration_tests {
     use magelab_cli::auth::touchid;
     use magelab_cli::auth::Credentials;

@@ -57,25 +57,7 @@ pub fn verify(tier: Tier, reason: &str) -> Result<()> {
     }
 }
 
-/// Store refresh token in a biometric-protected Keychain item.
-/// No-op on non-macOS or when Touch ID is unavailable.
-pub fn store_secure(refresh_token: &str) -> Result<()> {
-    if !is_available() {
-        return Ok(());
-    }
-    platform::store_biometric_item(refresh_token)
-}
-
-/// Load refresh token from biometric-protected Keychain item.
-/// Returns None on non-macOS, when unavailable, or on biometric failure.
-pub fn load_secure() -> Result<Option<String>> {
-    if !is_available() {
-        return Ok(None);
-    }
-    platform::load_biometric_item()
-}
-
-/// Clear biometric Keychain item and session cache.
+/// Clear legacy biometric Keychain item and session cache.
 pub fn clear() -> Result<()> {
     session_cache::delete();
     platform::delete_biometric_item()
