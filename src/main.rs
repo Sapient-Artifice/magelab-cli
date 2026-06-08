@@ -1,6 +1,7 @@
 mod account;
 mod analytics;
 mod auth;
+mod backend_auth;
 mod client;
 mod config;
 mod connect;
@@ -369,6 +370,12 @@ fn cmd_logout(_config: &Config) -> Result<()> {
 }
 
 async fn cmd_auth_token(config: &Config) -> Result<()> {
+    let token = get_current_cli_auth_token(config).await?;
+    print!("{}", token);
+    Ok(())
+}
+
+async fn get_current_cli_auth_token(config: &Config) -> Result<String> {
     let creds = auth::Credentials::load()?;
     if !creds.is_token_valid() {
         if let Some(refresh) = &creds.refresh_token {
@@ -379,17 +386,13 @@ async fn cmd_auth_token(config: &Config) -> Result<()> {
             }
             auth::save_refreshed_credentials(&new_creds)?;
             if let Some(token) = &new_creds.access_token {
-                print!("{}", token); // No newline — for piping
-                return Ok(());
+                return Ok(token.clone());
             }
         }
         anyhow::bail!("Token expired and refresh failed. Run: mage login");
     }
     match &creds.access_token {
-        Some(token) => {
-            print!("{}", token);
-            Ok(())
-        }
+        Some(token) => Ok(token.clone()),
         None => anyhow::bail!("Not logged in. Run: mage login"),
     }
 }
@@ -528,17 +531,30 @@ async fn cmd_launch(
         std::mem::forget(child);
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", wait_url));
+        config.local_url = wait_url.clone();
 
         // Auto-push vault secrets (same as desktop's initSecrets startup flow)
         if let Ok(v) = magelab_core::vault::Vault::open() {
             if let Ok(secrets) = v.all_secrets() {
                 if !secrets.is_empty() {
-                    config.local_url = wait_url.clone();
                     if let Err(e) = vault::push_secrets(config).await {
                         eprintln!("Warning: vault push failed: {e}");
                     }
                 }
             }
+        }
+
+        match get_current_cli_auth_token(config).await {
+            Ok(token) => {
+                if let Err(e) =
+                    backend_auth::push_access_token_to_backend(&config.local_url, &token).await
+                {
+                    eprintln!("Warning: auth token push failed: {e}");
+                } else {
+                    ui::success("Auth token pushed to backend");
+                }
+            }
+            Err(e) => eprintln!("Warning: auth token push skipped: {e}"),
         }
     } else {
         // Fire-and-forget launch intentionally detaches immediately.

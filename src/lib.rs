@@ -1,6 +1,7 @@
 pub mod account;
 pub mod analytics;
 pub mod auth;
+pub mod backend_auth;
 pub mod client;
 pub mod config;
 pub mod connect;
