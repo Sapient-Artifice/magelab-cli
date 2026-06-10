@@ -443,9 +443,25 @@ async fn cmd_internal(config: &Config, action: InternalAction) -> Result<()> {
             let mut secrets = std::collections::HashMap::new();
             match magelab_core::vault::Vault::open() {
                 Ok(vault) => {
+                    let known_keys: std::collections::HashSet<&str> =
+                        magelab_core::vault::known_secret_keys()
+                            .iter()
+                            .copied()
+                            .collect();
                     for key in magelab_core::vault::known_secret_keys() {
                         if let Some(value) = vault.get(key)? {
                             secrets.insert((*key).to_string(), value);
+                        }
+                    }
+                    for key in vault.list()? {
+                        let canonical = key.trim().to_ascii_lowercase();
+                        if !canonical.starts_with("provider_api_key:")
+                            || known_keys.contains(canonical.as_str())
+                        {
+                            continue;
+                        }
+                        if let Some(value) = vault.get(&key)? {
+                            secrets.insert(canonical, value);
                         }
                     }
                 }
