@@ -12,6 +12,10 @@ mod vault;
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use client::remote::RemoteClient;
 use config::Config;
@@ -96,6 +100,12 @@ enum Commands {
         /// Allow binding the full-access backend to a non-localhost interface
         #[arg(long)]
         allow_network: bool,
+    },
+    /// Stop the headless backend launched by mage
+    Stop {
+        /// Force kill if the backend is unhealthy or does not exit after terminate
+        #[arg(long)]
+        force: bool,
     },
     /// Show backend health and connection info
     Status,
@@ -214,6 +224,13 @@ enum VaultAction {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BackendPidFile {
+    pid: u32,
+    url: String,
+    started_at: u64,
+}
+
 impl VaultAction {
     fn into_vault_action(self) -> vault::VaultAction {
         match self {
@@ -279,6 +296,7 @@ async fn main() -> Result<()> {
             dry_run,
             allow_network,
         } => cmd_launch(&mut config, wait, &host, port, dry_run, allow_network).await,
+        Commands::Stop { force } => cmd_stop(&config, force).await,
         Commands::Status => cmd_status(&config).await,
         Commands::Devices { action, json } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "access devices")?;
@@ -598,6 +616,7 @@ async fn cmd_launch(
     }
 
     let mut child = detect::launch_backend_headless(&bundle, host, port, config.relay_enabled)?;
+    let pid = child.id();
 
     if wait {
         let sp = ui::spinner("Starting backend...");
@@ -610,11 +629,13 @@ async fn cmd_launch(
         }
         // Detach the child so it outlives this CLI invocation after health succeeds.
         std::mem::forget(child);
+        write_backend_pid(pid, &wait_url)?;
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", wait_url));
     } else {
         // Fire-and-forget launch intentionally detaches immediately.
         std::mem::forget(child);
+        write_backend_pid(pid, &wait_url)?;
         ui::success("Backend launched");
         ui::label("check", "mage status");
     }
@@ -625,6 +646,57 @@ async fn cmd_launch(
         }
     }
 
+    Ok(())
+}
+
+async fn cmd_stop(config: &Config, force: bool) -> Result<()> {
+    let Some(pid_file) = read_backend_pid()? else {
+        if detect::check_backend_health(&config.local_url).await {
+            anyhow::bail!(
+                "Backend is running at {}, but no mage PID file was found. Stop it manually or restart it with `mage launch` first.",
+                config.local_url
+            );
+        }
+        println!("No mage-launched backend is running.");
+        return Ok(());
+    };
+
+    if !process_is_running(pid_file.pid) {
+        remove_backend_pid().ok();
+        println!(
+            "Removed stale backend PID file for exited process {}.",
+            pid_file.pid
+        );
+        return Ok(());
+    }
+
+    if !force && !detect::check_backend_health(&pid_file.url).await {
+        anyhow::bail!(
+            "PID {} is recorded for {}, but the backend health check failed. Re-run with `mage stop --force` to terminate it anyway.",
+            pid_file.pid,
+            pid_file.url
+        );
+    }
+
+    terminate_process(pid_file.pid, force)?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while process_is_running(pid_file.pid) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    if process_is_running(pid_file.pid) {
+        if !force {
+            anyhow::bail!(
+                "Backend process {} did not exit. Re-run with `mage stop --force`.",
+                pid_file.pid
+            );
+        }
+        kill_process(pid_file.pid)?;
+    }
+
+    remove_backend_pid().ok();
+    ui::success(&format!("Stopped backend at {}", pid_file.url));
     Ok(())
 }
 
@@ -643,6 +715,119 @@ fn validate_launch_host(host: &str, allow_network: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn backend_pid_path() -> Result<PathBuf> {
+    Ok(Config::dir()?.join("backend.pid.json"))
+}
+
+fn write_backend_pid(pid: u32, url: &str) -> Result<()> {
+    let path = backend_pid_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let data = BackendPidFile {
+        pid,
+        url: url.to_string(),
+        started_at,
+    };
+    std::fs::write(path, serde_json::to_string_pretty(&data)?)?;
+    Ok(())
+}
+
+fn read_backend_pid() -> Result<Option<BackendPidFile>> {
+    let path = backend_pid_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&path)?;
+    let data = serde_json::from_str(&contents)?;
+    Ok(Some(data))
+}
+
+fn remove_backend_pid() -> Result<()> {
+    let path = backend_pid_path()?;
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn process_is_running(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn process_is_running(pid: u32) -> bool {
+    let filter = format!("PID eq {}", pid);
+    Command::new("tasklist")
+        .args(["/FI", &filter])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn terminate_process(pid: u32, force: bool) -> Result<()> {
+    if force {
+        kill_process(pid)
+    } else {
+        let status = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            anyhow::bail!("Failed to terminate backend process {}", pid)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn terminate_process(pid: u32, force: bool) -> Result<()> {
+    let mut args = vec!["/PID".to_string(), pid.to_string(), "/T".to_string()];
+    if force {
+        args.push("/F".to_string());
+    }
+    let status = Command::new("taskkill").args(args).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Failed to terminate backend process {}", pid)
+    }
+}
+
+#[cfg(unix)]
+fn kill_process(pid: u32) -> Result<()> {
+    let status = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Failed to kill backend process {}", pid)
+    }
+}
+
+#[cfg(windows)]
+fn kill_process(pid: u32) -> Result<()> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Failed to kill backend process {}", pid)
+    }
 }
 
 fn wait_url(host: &str, port: u16) -> String {
