@@ -615,7 +615,24 @@ async fn cmd_launch(
         return Ok(());
     }
 
-    let mut child = detect::launch_backend_headless(&bundle, host, port, config.relay_enabled)?;
+    let signed_in = auth::Credentials::load()
+        .map(|c| c.access_token.is_some())
+        .unwrap_or(false);
+    if !signed_in {
+        ui::label(
+            "auth",
+            "not signed in — backend will run unauthenticated (run `mage login` to fix)",
+        );
+    }
+
+    let control_secret = detect::generate_backend_control_secret();
+    let mut child = detect::launch_backend_headless(
+        &bundle,
+        host,
+        port,
+        config.relay_enabled,
+        &control_secret,
+    )?;
     let pid = child.id();
 
     if wait {
