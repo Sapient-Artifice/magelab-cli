@@ -32,7 +32,7 @@ export function validateConnectionInfo(data: unknown): ConnectionInfo {
 
 /**
  * Run `mage connect --json --no-launch` and parse the result.
- * Looks for `mage` first, then legacy `magelab`.
+ * Looks for the `mage` CLI binary.
  * Throws if the binary is not found or returns non-zero.
  */
 export async function getConnection(): Promise<ConnectionInfo> {

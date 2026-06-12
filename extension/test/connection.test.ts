@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getConnection, validateConnectionInfo } from "../src/connection.js";
 
-// These tests exercise getConnection against the real `mage`/`magelab` binary.
-// If neither is installed, they verify the ENOENT fallback behavior.
+// These tests exercise getConnection against the real `mage` binary.
+// If it isn't installed, they verify the ENOENT fallback behavior.
 
 const hasMageCli = (() => {
   try {
@@ -13,27 +13,14 @@ const hasMageCli = (() => {
     execFileSync("mage", ["version"], { stdio: "ignore" });
     return true;
   } catch {
-    // Also check legacy magelab and cargo-installed binaries.
+    // Also check cargo-installed mage.
     const cargoMagePath = join(require("node:os").homedir(), ".cargo", "bin", "mage");
-    const cargoMagelabPath = join(require("node:os").homedir(), ".cargo", "bin", "magelab");
     try {
       const { execFileSync } = require("node:child_process");
-      execFileSync("magelab", ["version"], { stdio: "ignore" });
+      execFileSync(cargoMagePath, ["version"], { stdio: "ignore" });
       return true;
     } catch {
-      try {
-        const { execFileSync } = require("node:child_process");
-        execFileSync(cargoMagePath, ["version"], { stdio: "ignore" });
-        return true;
-      } catch {
-        try {
-          const { execFileSync } = require("node:child_process");
-          execFileSync(cargoMagelabPath, ["version"], { stdio: "ignore" });
-          return true;
-        } catch {
-          return false;
-        }
-      }
+      return false;
     }
   }
 })();
@@ -41,7 +28,7 @@ const hasMageCli = (() => {
 describe("getConnection", () => {
   it("returns a ConnectionInfo object with expected fields", async () => {
     if (!hasMageCli) {
-      // Without mage/magelab, getConnection should throw with install instructions
+      // Without mage, getConnection should throw with install instructions
       await expect(getConnection()).rejects.toThrow("mage");
       return;
     }

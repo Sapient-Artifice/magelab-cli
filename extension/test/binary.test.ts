@@ -15,7 +15,7 @@ function lookup(existing: string[], deps: BinaryLookupDeps = {}) {
 }
 
 describe("findMageBinary", () => {
-  it("prefers mage in cargo bin over legacy magelab", () => {
+  it("prefers mage in cargo bin", () => {
     expect(
       lookup([
         "/home/tester/.cargo/bin/mage",
@@ -24,10 +24,8 @@ describe("findMageBinary", () => {
     ).toBe("/home/tester/.cargo/bin/mage");
   });
 
-  it("falls back to legacy magelab for existing installs", () => {
-    expect(lookup(["/home/tester/.cargo/bin/magelab"])).toBe(
-      "/home/tester/.cargo/bin/magelab"
-    );
+  it("does not use magelab because that name belongs to the desktop app", () => {
+    expect(lookup(["/home/tester/.cargo/bin/magelab"])).toBe("mage");
   });
 
   it("searches PATH before falling back to the bare mage command", () => {
@@ -53,15 +51,15 @@ describe("findMageBinary", () => {
     ).toBe(join("C:\\Users\\tester", ".cargo", "bin", "mage.CMD"));
   });
 
-  it("checks mage before magelab on Windows PATH", () => {
+  it("ignores magelab on Windows PATH", () => {
     expect(
-      lookup([join("C:\\npm", "mage.CMD"), join("C:\\npm", "magelab.CMD")], {
+      lookup([join("C:\\npm", "magelab.CMD")], {
         homedir: () => "C:\\Users\\tester",
         env: { PATH: "C:\\npm", PATHEXT: ".CMD" },
         pathDelimiter: ";",
         platform: "win32",
       })
-    ).toBe(join("C:\\npm", "mage.CMD"));
+    ).toBe("mage");
   });
 });
 
