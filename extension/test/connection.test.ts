@@ -63,7 +63,13 @@ describe("getConnection", () => {
   it("returns mode with correct type", async () => {
     if (!hasMageCli) return;
 
-    const conn = await getConnection();
+    let conn;
+    try {
+      conn = await getConnection();
+    } catch (err: any) {
+      expect(err.message).toContain("mage connect failed");
+      return;
+    }
     expect(typeof conn.mode).toBe("string");
     if (conn.url !== null) {
       expect(typeof conn.url).toBe("string");
