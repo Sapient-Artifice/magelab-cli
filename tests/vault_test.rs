@@ -19,7 +19,7 @@ fn test_vault_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("get"))
-        .stdout(predicate::str::contains("push"));
+        .stdout(predicate::str::contains("push").not());
 }
 
 #[test]
