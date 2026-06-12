@@ -68,6 +68,11 @@ mage version
 User config: `~/.config/magelab/cli.toml`
 Credentials: `~/.config/magelab/credentials.json` (or system keychain)
 
+## Code Style
+
+- **Pure functions by default.** Extract logic into pure functions with injectable dependencies (e.g. `exists`, `home`) so they're testable without mocking the filesystem or environment. Side-effectful wrappers call the pure core.
+- **TDD where it makes sense.** Write failing tests before implementation for non-trivial logic. Unit tests for pure functions; integration tests only where real I/O is unavoidable. Always write tests for existing behavior before modifying it.
+
 ## Design Spec
 
 See: `docs/superpowers/specs/2026-04-22-cli-pi-strategy-design.md`

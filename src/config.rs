@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default, skip_serializing)]
-    pub api_key: Option<String>,
-
     #[serde(default = "default_model")]
     pub default_model: String,
 
@@ -81,7 +78,6 @@ fn default_auto_approve() -> Vec<String> {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api_key: None,
             default_model: default_model(),
             magelab_home: None,
             gateway_url: default_gateway_url(),
@@ -165,7 +161,8 @@ impl Config {
     }
 
     /// Get API key from MAGELAB_API_KEY env var only.
-    /// The plaintext api_key field in cli.toml is deprecated and ignored.
+    /// A plaintext api_key in cli.toml is no longer read (the field was removed);
+    /// any such key is silently ignored by serde.
     pub fn api_key(&self) -> Option<String> {
         std::env::var("MAGELAB_API_KEY").ok()
     }

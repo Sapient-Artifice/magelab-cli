@@ -17,6 +17,7 @@ const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 const EXT_COMMANDS_TS: &str = include_str!("../extension/src/commands.ts");
 const EXT_VALIDATION_TS: &str = include_str!("../extension/src/validation.ts");
 const EXT_PROTOCOL_TS: &str = include_str!("../extension/src/protocol.ts");
+const EXT_BINARY_TS: &str = include_str!("../extension/src/binary.ts");
 
 fn command_path(name: &str) -> PathBuf {
     #[cfg(windows)]
@@ -189,6 +190,7 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::write(src_dir.join("commands.ts"), EXT_COMMANDS_TS)?;
         std::fs::write(src_dir.join("validation.ts"), EXT_VALIDATION_TS)?;
         std::fs::write(src_dir.join("protocol.ts"), EXT_PROTOCOL_TS)?;
+        std::fs::write(src_dir.join("binary.ts"), EXT_BINARY_TS)?;
 
         sp.set_message("Installing dependencies...");
 

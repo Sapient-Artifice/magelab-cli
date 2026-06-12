@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { configPaths, runMage } from "./binary.js";
 import { getConnection } from "./connection.js";
 import { BackendSocket, type ConfirmationRequest } from "./websocket.js";
 import { registerBackendTools } from "./tools.js";
@@ -10,10 +11,7 @@ import { isAllowedUrl, isAllowedFilepath } from "./validation.js";
 
 /** Read auto_approve list from magelab CLI config */
 function loadAutoApproveList(): Set<string> {
-  const paths = [
-    join(homedir(), "Library", "Application Support", "magelab", "cli.toml"),
-    join(homedir(), ".config", "magelab", "cli.toml"),
-  ];
+  const paths = configPaths(homedir());
   for (const p of paths) {
     if (!existsSync(p)) continue;
     try {
@@ -90,6 +88,39 @@ export default async function (pi: any) {
     return { skillPaths };
   });
 
+  // A SINGLE session_start handler, registered once and eagerly. It bridges two
+  // jobs that become available at different times: a startup-problem notice (set
+  // during the async init below) and the "ready" work — tool activation, ready
+  // notice, balance — which is only defined after a successful connect (`onReady`).
+  // Storing the ctx lets either job run regardless of whether it was ready
+  // before or after session_start fired. One registration avoids depending on
+  // whether pi.on is additive or last-registration-wins.
+  let startupNotice:
+    | { message: string; level: "info" | "warning" | "error" }
+    | null = null;
+  let onReady: ((ctx: any) => void | Promise<void>) | null = null;
+  let sessionStarted = false;
+  let sessionStartCtx: any = null;
+
+  const handleSessionStart = async (ctx: any) => {
+    if (startupNotice && ctx?.hasUI) {
+      ctx.ui.notify(startupNotice.message, startupNotice.level);
+      startupNotice = null; // notify at most once
+    }
+    if (onReady) await onReady(ctx);
+  };
+  // Run the handler now if session_start already fired (e.g. a notice/onReady
+  // became available after the event); otherwise the registration below runs it.
+  const fireSessionStart = () => {
+    if (sessionStarted) void handleSessionStart(sessionStartCtx);
+  };
+
+  pi.on("session_start", async (_event: unknown, ctx: any) => {
+    sessionStarted = true;
+    sessionStartCtx = ctx;
+    await handleSessionStart(ctx);
+  });
+
   // 1. Configure MageLab Gateway as a Pi provider (if logged in)
   try {
     await ensureGatewayProvider();
@@ -101,20 +132,41 @@ export default async function (pi: any) {
   // Retry up to 5 times (1.5 s apart) to allow a just-launched backend to
   // become ready.  Only bail out immediately on hard failures (binary not
   // found).  Transient subprocess errors or mode=="none" are retried.
-  let conn;
+  let conn: Awaited<ReturnType<typeof getConnection>> | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       conn = await getConnection();
       if (conn.mode !== "none") break;
     } catch (err: any) {
-      // Binary not found — no point retrying.
-      if (err?.code === "ENOENT" || (err?.message as string)?.includes("not found")) return;
+      // Binary genuinely missing (ENOENT) — no point retrying. Rely solely on
+      // the error code; matching on a "not found" substring would misclassify
+      // unrelated backend errors (e.g. "device not found") as a missing CLI.
+      if (err?.code === "ENOENT") {
+        // getConnection normalizes ENOENT/EACCES/EISDIR/ENOTDIR and tailors the
+        // message (e.g. "not executable" vs "not found"); surface it verbatim.
+        startupNotice = { message: `MageLab: ${err.message}`, level: "error" };
+        fireSessionStart();
+        return;
+      }
       // Any other error (e.g. subprocess crash) — retry.
     }
     if (attempt < 4) await new Promise((r) => setTimeout(r, 1500));
   }
 
   if (!conn || conn.mode === "none" || conn.mode === "remote") {
+    startupNotice =
+      !conn || conn.mode === "none"
+        ? {
+            message:
+              "MageLab: backend not running — tools unavailable. Run: mage launch --wait",
+            level: "warning",
+          }
+        : {
+            message:
+              "MageLab: remote mode not supported for tool execution. Run: mage launch --wait",
+            level: "warning",
+          };
+    fireSessionStart();
     return;
   }
 
@@ -123,6 +175,11 @@ export default async function (pi: any) {
   try {
     socket = await BackendSocket.connect(conn.url!, conn.token);
   } catch {
+    startupNotice = {
+      message: "MageLab: failed to connect to backend. Run: mage launch --wait",
+      level: "error",
+    };
+    fireSessionStart();
     return;
   }
 
@@ -216,9 +273,8 @@ export default async function (pi: any) {
   });
 
   // 5. Tool execution display — show backend agent's tool calls in Pi's status
-  socket.on("tool_result", (msg: any) => {
+  socket.on("tool_result", (_msg: any) => {
     if (!sessionCtx?.hasUI) return;
-    const name = msg.function_name || "tool";
     sessionCtx.ui.setStatus("magelab-tool", undefined); // clear after completion
   });
 
@@ -457,9 +513,11 @@ export default async function (pi: any) {
     });
   }
 
-  // 10. Activate only the MageLab tools we just registered on session start.
-
-  pi.on("session_start", async (_event: unknown, ctx: any) => {
+  // 10. On session start, activate the MageLab tools we just registered (plus
+  //     ready notice + balance check). This runs through the single eager
+  //     session_start handler whether the event already fired or arrives later,
+  //     so tool activation is never dropped by the connect/retry delay above.
+  onReady = async (ctx: any) => {
     sessionCtx = ctx;
     try {
       const active: string[] = pi.getActiveTools();
@@ -478,14 +536,7 @@ export default async function (pi: any) {
 
       // Proactive balance check — warn if low or zero
       try {
-        const { execFile: ef } = await import("node:child_process");
-        const { promisify: p } = await import("node:util");
-        const { existsSync: ex } = await import("node:fs");
-        const { join: j } = await import("node:path");
-        const { homedir: hd } = await import("node:os");
-        const cargoPath = j(hd(), ".cargo", "bin", "magelab");
-        const bin = ex(cargoPath) ? cargoPath : "magelab";
-        const { stdout } = await p(ef)(bin, ["balance"]);
+        const stdout = await runMage(["balance"]);
         const balanceMatch = stdout.match(/(\$[\d.]+|\d+\.\d+)/);
         if (balanceMatch) {
           const amount = parseFloat(balanceMatch[0].replace("$", ""));
@@ -505,7 +556,9 @@ export default async function (pi: any) {
         // Balance check failed — non-fatal
       }
     }
-  });
+  };
+  // If session_start already fired during the connect/retry delay, run onReady now.
+  fireSessionStart();
 
   // 9. Intercept Gateway errors with helpful messages
   //    Only show MageLab-specific guidance when the active model is from our provider.
@@ -523,12 +576,12 @@ export default async function (pi: any) {
 
     if (event.status === 402) {
       ctx.ui.notify(
-        "MageLab: no credits remaining. Add credits at magelab.ai or run: magelab balance",
+        "MageLab: no credits remaining. Add credits at magelab.ai or run: mage balance",
         "error"
       );
     } else if (event.status === 401) {
       ctx.ui.notify(
-        "MageLab: authentication failed. Run: magelab login",
+        "MageLab: authentication failed. Run: mage login",
         "error"
       );
     } else if (event.status === 429) {

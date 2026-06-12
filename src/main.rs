@@ -147,7 +147,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthAction {
-    /// Print auth token to stdout. Uses JWT if valid, attempts refresh if expired, falls back to API key from config.
+    /// Print auth token to stdout. Resolves via the chain:
+    /// JWT → refresh → vault (interactive only) → MAGELAB_API_KEY env. Used by
+    /// the Pi extension's `"!mage auth token"` reference, resolved per request.
     Token,
 }
 
@@ -208,14 +210,6 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
-    // Warn if plaintext API key exists in cli.toml (deprecated)
-    if config.api_key.is_some() {
-        eprintln!(
-            "Warning: Plaintext API key in cli.toml is deprecated.\n\
-             Set it in the desktop app or use MAGELAB_API_KEY env var instead."
-        );
-    }
-
     if config.telemetry() {
         analytics::init().await;
     }
@@ -236,6 +230,17 @@ async fn main() -> Result<()> {
         }
         Commands::Auth { action } => match action {
             AuthAction::Token => {
+                // NOTE: TouchID gates this only in an interactive terminal.
+                // touchid::verify() is a no-op when stdin is not a TTY
+                // (is_available() returns false), so the per-request invocations
+                // Pi makes via "!mage auth token" run non-interactively and do
+                // NOT prompt for biometrics. Interactive `mage auth token` still
+                // prompts (Tier::Cached, 5-minute session cache).
+                //
+                // Because of that, non-interactive callers only ever receive a
+                // short-lived JWT or their own MAGELAB_API_KEY env var — the
+                // long-lived vault API key is interactive-only (see
+                // auth::get_token), so it stays behind the biometric gate.
                 auth::touchid::verify(auth::touchid::Tier::Cached, "access auth token")?;
                 cmd_auth_token(&config).await
             }
@@ -369,29 +374,14 @@ fn cmd_logout(_config: &Config) -> Result<()> {
 }
 
 async fn cmd_auth_token(config: &Config) -> Result<()> {
-    let creds = auth::Credentials::load()?;
-    if !creds.is_token_valid() {
-        if let Some(refresh) = &creds.refresh_token {
-            let mut new_creds =
-                magelab_core::auth::refresh_token(&config.gateway_url, refresh).await?;
-            if new_creds.refresh_token.is_none() {
-                new_creds.refresh_token = Some(refresh.clone());
-            }
-            auth::save_refreshed_credentials(&new_creds)?;
-            if let Some(token) = &new_creds.access_token {
-                print!("{}", token); // No newline — for piping
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Token expired and refresh failed. Run: mage login");
-    }
-    match &creds.access_token {
-        Some(token) => {
-            print!("{}", token);
-            Ok(())
-        }
-        None => anyhow::bail!("Not logged in. Run: mage login"),
-    }
+    // Delegate to the canonical fallback chain so a single `mage auth token`
+    // covers every credential source the Pi extension relies on:
+    //   JWT → refresh → vault (interactive only) → MAGELAB_API_KEY env → error.
+    // Pi's models.json points apiKey at "!mage auth token" and resolves it per
+    // request, so this command must always print the best available token.
+    let token = auth::get_token(config).await?;
+    print!("{}", token); // No newline — for piping
+    Ok(())
 }
 
 async fn cmd_connect(
