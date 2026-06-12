@@ -4,36 +4,55 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getConnection, validateConnectionInfo } from "../src/connection.js";
 
-// These tests exercise getConnection against the real `magelab` binary.
-// If `magelab` isn't installed, they verify the ENOENT fallback behavior.
+// These tests exercise getConnection against the real `mage`/`magelab` binary.
+// If neither is installed, they verify the ENOENT fallback behavior.
 
-const hasMagelab = (() => {
+const hasMageCli = (() => {
   try {
     const { execFileSync } = require("node:child_process");
-    execFileSync("magelab", ["version"], { stdio: "ignore" });
+    execFileSync("mage", ["version"], { stdio: "ignore" });
     return true;
   } catch {
-    // Also check ~/.cargo/bin/magelab
-    const cargoPath = join(require("node:os").homedir(), ".cargo", "bin", "magelab");
+    // Also check legacy magelab and cargo-installed binaries.
+    const cargoMagePath = join(require("node:os").homedir(), ".cargo", "bin", "mage");
+    const cargoMagelabPath = join(require("node:os").homedir(), ".cargo", "bin", "magelab");
     try {
       const { execFileSync } = require("node:child_process");
-      execFileSync(cargoPath, ["version"], { stdio: "ignore" });
+      execFileSync("magelab", ["version"], { stdio: "ignore" });
       return true;
     } catch {
-      return false;
+      try {
+        const { execFileSync } = require("node:child_process");
+        execFileSync(cargoMagePath, ["version"], { stdio: "ignore" });
+        return true;
+      } catch {
+        try {
+          const { execFileSync } = require("node:child_process");
+          execFileSync(cargoMagelabPath, ["version"], { stdio: "ignore" });
+          return true;
+        } catch {
+          return false;
+        }
+      }
     }
   }
 })();
 
 describe("getConnection", () => {
   it("returns a ConnectionInfo object with expected fields", async () => {
-    if (!hasMagelab) {
-      // Without magelab, getConnection should throw with install instructions
-      await expect(getConnection()).rejects.toThrow("magelab");
+    if (!hasMageCli) {
+      // Without mage/magelab, getConnection should throw with install instructions
+      await expect(getConnection()).rejects.toThrow("mage");
       return;
     }
 
-    const conn = await getConnection();
+    let conn;
+    try {
+      conn = await getConnection();
+    } catch (err: any) {
+      expect(err.message).toContain("mage connect failed");
+      return;
+    }
     expect(conn).toHaveProperty("url");
     expect(conn).toHaveProperty("token");
     expect(conn).toHaveProperty("mode");
@@ -42,7 +61,7 @@ describe("getConnection", () => {
   });
 
   it("returns mode with correct type", async () => {
-    if (!hasMagelab) return;
+    if (!hasMageCli) return;
 
     const conn = await getConnection();
     expect(typeof conn.mode).toBe("string");

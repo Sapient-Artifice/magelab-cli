@@ -12,18 +12,12 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
+import { configPaths, findMageBinary } from "./binary.js";
 
 const execFileAsync = promisify(execFile);
 
 const GATEWAY_URL = "https://api.magelab.ai/v1";
 const PROVIDER_NAME = "magelab";
-
-/** Find the magelab binary: ~/.cargo/bin/ first, then PATH */
-function findBinary(): string {
-  const cargoPath = join(homedir(), ".cargo", "bin", "magelab");
-  if (existsSync(cargoPath)) return cargoPath;
-  return "magelab";
-}
 
 /**
  * Try to read a static API key from the CLI config file.
@@ -31,13 +25,7 @@ function findBinary(): string {
  * Only reads TOML double-quoted strings (the only format magelab writes).
  */
 function readStaticApiKey(): string | undefined {
-  const configPaths = [
-    // macOS
-    join(homedir(), "Library", "Application Support", "magelab", "cli.toml"),
-    // Linux / Windows (XDG / fallback)
-    join(homedir(), ".config", "magelab", "cli.toml"),
-  ];
-  for (const p of configPaths) {
+  for (const p of configPaths()) {
     if (!existsSync(p)) continue;
     try {
       const content = readFileSync(p, "utf-8");
@@ -65,14 +53,14 @@ async function getCredential(): Promise<{ key: string; isJwt: boolean }> {
   const staticKey = readStaticApiKey();
   if (staticKey) return { key: staticKey, isJwt: false };
 
-  // 3. Fall back to a short-lived JWT from `magelab auth token`
+  // 3. Fall back to a short-lived JWT from `mage auth token`
   //    This token expires in minutes — callers must NOT persist it.
-  const bin = findBinary();
+  const bin = findMageBinary();
   const { stdout } = await execFileAsync(bin, ["auth", "token"]);
   const token = stdout.trim();
   if (token) return { key: token, isJwt: true };
 
-  throw new Error("No API key or auth token found — run: magelab login");
+  throw new Error("No API key or auth token found - run: mage login");
 }
 
 /**

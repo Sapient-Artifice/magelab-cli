@@ -1,8 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { promisify } from "node:util";
+import { findMageBinary } from "./binary.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,30 +30,23 @@ export function validateConnectionInfo(data: unknown): ConnectionInfo {
   return obj as unknown as ConnectionInfo;
 }
 
-/** Find the magelab binary: PATH first, then ~/.cargo/bin/ */
-function findMagelabBinary(): string {
-  const cargoPath = join(homedir(), ".cargo", "bin", "magelab");
-  if (existsSync(cargoPath)) return cargoPath;
-  return "magelab"; // hope it's on PATH
-}
-
 /**
- * Run `magelab connect --json --no-launch` and parse the result.
- * Looks for the binary on PATH and in ~/.cargo/bin/.
+ * Run `mage connect --json --no-launch` and parse the result.
+ * Looks for `mage` first, then legacy `magelab`.
  * Throws if the binary is not found or returns non-zero.
  */
 export async function getConnection(): Promise<ConnectionInfo> {
-  const bin = findMagelabBinary();
+  const bin = findMageBinary();
   try {
     const { stdout } = await execFileAsync(bin, CONNECT_ARGS);
     return validateConnectionInfo(JSON.parse(stdout));
   } catch (err: any) {
     if (err.code === "ENOENT") {
-      throw new Error(
-        "magelab CLI not found. Install: cargo install --path /path/to/magelab-cli"
-      );
+      const wrapped = new Error("mage CLI not found. Install: cargo install --path /path/to/magelab-cli");
+      (wrapped as NodeJS.ErrnoException).code = err.code;
+      throw wrapped;
     }
     const stderr = err.stderr?.trim() || err.message;
-    throw new Error(`magelab connect failed: ${stderr}`);
+    throw new Error(`mage connect failed: ${stderr}`);
   }
 }

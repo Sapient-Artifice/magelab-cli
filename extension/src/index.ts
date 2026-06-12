@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { configPaths, findMageBinary } from "./binary.js";
 import { getConnection } from "./connection.js";
 import { BackendSocket, type ConfirmationRequest } from "./websocket.js";
 import { registerBackendTools } from "./tools.js";
@@ -10,11 +11,7 @@ import { isAllowedUrl, isAllowedFilepath } from "./validation.js";
 
 /** Read auto_approve list from magelab CLI config */
 function loadAutoApproveList(): Set<string> {
-  const paths = [
-    join(homedir(), "Library", "Application Support", "magelab", "cli.toml"),
-    join(homedir(), ".config", "magelab", "cli.toml"),
-  ];
-  for (const p of paths) {
+  for (const p of configPaths()) {
     if (!existsSync(p)) continue;
     try {
       const content = readFileSync(p, "utf-8");
@@ -480,11 +477,7 @@ export default async function (pi: any) {
       try {
         const { execFile: ef } = await import("node:child_process");
         const { promisify: p } = await import("node:util");
-        const { existsSync: ex } = await import("node:fs");
-        const { join: j } = await import("node:path");
-        const { homedir: hd } = await import("node:os");
-        const cargoPath = j(hd(), ".cargo", "bin", "magelab");
-        const bin = ex(cargoPath) ? cargoPath : "magelab";
+        const bin = findMageBinary();
         const { stdout } = await p(ef)(bin, ["balance"]);
         const balanceMatch = stdout.match(/(\$[\d.]+|\d+\.\d+)/);
         if (balanceMatch) {
@@ -523,12 +516,12 @@ export default async function (pi: any) {
 
     if (event.status === 402) {
       ctx.ui.notify(
-        "MageLab: no credits remaining. Add credits at magelab.ai or run: magelab balance",
+        "MageLab: no credits remaining. Add credits at magelab.ai or run: mage balance",
         "error"
       );
     } else if (event.status === 401) {
       ctx.ui.notify(
-        "MageLab: authentication failed. Run: magelab login",
+        "MageLab: authentication failed. Run: mage login",
         "error"
       );
     } else if (event.status === 429) {
