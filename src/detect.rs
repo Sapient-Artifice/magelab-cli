@@ -376,14 +376,16 @@ pub fn port_from_url(url: &str) -> u16 {
 }
 
 fn dev_python(backend_dir: &Path) -> PathBuf {
-    // Check for venv — path differs by platform
-    #[cfg(not(target_os = "windows"))]
-    let venv_python = backend_dir.join(".venv").join("bin").join("python");
-    #[cfg(target_os = "windows")]
-    let venv_python = backend_dir.join(".venv").join("Scripts").join("python.exe");
+    let candidates = [
+        backend_dir.join(".venv").join("Scripts").join("python.exe"),
+        backend_dir.join(".venv").join("bin").join("python"),
+        backend_dir.join(".venv").join("bin").join("python3"),
+    ];
 
-    if venv_python.exists() {
-        return venv_python;
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate;
+        }
     }
 
     // Fallback to system
@@ -398,13 +400,11 @@ fn dev_python(backend_dir: &Path) -> PathBuf {
 }
 
 fn packaged_python(api_dir: &Path) -> Option<PathBuf> {
-    #[cfg(not(target_os = "windows"))]
-    let candidates = [api_dir.join("python").join("bin").join("python3")];
-
-    #[cfg(target_os = "windows")]
     let candidates = [
         api_dir.join("python").join("python.exe"),
         api_dir.join("python").join("Scripts").join("python.exe"),
+        api_dir.join("python").join("bin").join("python3"),
+        api_dir.join("python").join("bin").join("python"),
     ];
 
     candidates.into_iter().find(|path| path.exists())

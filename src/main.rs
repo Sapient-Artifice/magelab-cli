@@ -292,7 +292,19 @@ async fn main() -> Result<()> {
             ws,
         } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "connect")?;
-            cmd_connect(&config, json, no_launch, local, relay, remote, url, ws).await
+            cmd_connect(
+                &config,
+                ConnectOptions {
+                    json,
+                    no_launch,
+                    local,
+                    relay,
+                    remote,
+                    url,
+                    ws,
+                },
+            )
+            .await
         }
         Commands::Launch {
             wait,
@@ -486,8 +498,7 @@ async fn cmd_internal(config: &Config, action: InternalAction) -> Result<()> {
     }
 }
 
-async fn cmd_connect(
-    config: &Config,
+struct ConnectOptions {
     json: bool,
     no_launch: bool,
     local: bool,
@@ -495,7 +506,18 @@ async fn cmd_connect(
     remote: bool,
     url: Option<String>,
     ws: Option<String>,
-) -> Result<()> {
+}
+
+async fn cmd_connect(config: &Config, opts: ConnectOptions) -> Result<()> {
+    let ConnectOptions {
+        json,
+        no_launch,
+        local,
+        relay,
+        remote,
+        url,
+        ws,
+    } = opts;
     let has_url_override = url.is_some() || ws.is_some();
     let local_url = if let Some(ws_url) = ws {
         connect::direct_ws_to_http_url(&ws_url)?
@@ -800,12 +822,10 @@ fn terminate_process(pid: u32, force: bool) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn terminate_process(pid: u32, force: bool) -> Result<()> {
-    let mut args = vec!["/PID".to_string(), pid.to_string(), "/T".to_string()];
-    if force {
-        args.push("/F".to_string());
-    }
-    let status = Command::new("taskkill").args(args).status()?;
+fn terminate_process(pid: u32, _force: bool) -> Result<()> {
+    let status = Command::new("taskkill")
+        .args(windows_taskkill_args(pid))
+        .status()?;
     if status.success() {
         Ok(())
     } else {
@@ -828,12 +848,35 @@ fn kill_process(pid: u32) -> Result<()> {
 #[cfg(windows)]
 fn kill_process(pid: u32) -> Result<()> {
     let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(windows_taskkill_args(pid))
         .status()?;
     if status.success() {
         Ok(())
     } else {
         anyhow::bail!("Failed to kill backend process {}", pid)
+    }
+}
+
+#[cfg(windows)]
+fn windows_taskkill_args(pid: u32) -> [String; 4] {
+    ["/PID".into(), pid.to_string(), "/T".into(), "/F".into()]
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_taskkill_args_force_process_tree() {
+        assert_eq!(
+            windows_taskkill_args(1234),
+            [
+                "/PID".to_string(),
+                "1234".to_string(),
+                "/T".to_string(),
+                "/F".to_string()
+            ]
+        );
     }
 }
 
