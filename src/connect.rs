@@ -88,9 +88,14 @@ pub async fn resolve_with_local_url(
     if !no_launch {
         if let Some(bundle) = detect::find_backend_bundle(config.magelab_home.as_deref())? {
             let port = detect::port_from_url(local_url);
-            if let Ok(mut child) =
-                detect::launch_backend_headless(&bundle, "127.0.0.1", port, config.relay_enabled)
-            {
+            let control_secret = detect::generate_backend_control_secret();
+            if let Ok(mut child) = detect::launch_backend_headless(
+                &bundle,
+                "127.0.0.1",
+                port,
+                config.relay_enabled,
+                &control_secret,
+            ) {
                 if detect::wait_for_backend(local_url, Duration::from_secs(15))
                     .await
                     .is_ok()

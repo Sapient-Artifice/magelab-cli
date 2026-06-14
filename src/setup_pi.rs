@@ -10,6 +10,7 @@ use crate::ui;
 const EXT_PACKAGE_JSON: &str = include_str!("../extension/package.json");
 const EXT_TSCONFIG: &str = include_str!("../extension/tsconfig.json");
 const EXT_INDEX_TS: &str = include_str!("../extension/src/index.ts");
+const EXT_BINARY_TS: &str = include_str!("../extension/src/binary.ts");
 const EXT_CONNECTION_TS: &str = include_str!("../extension/src/connection.ts");
 const EXT_WEBSOCKET_TS: &str = include_str!("../extension/src/websocket.ts");
 const EXT_TOOLS_TS: &str = include_str!("../extension/src/tools.ts");
@@ -17,7 +18,6 @@ const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 const EXT_COMMANDS_TS: &str = include_str!("../extension/src/commands.ts");
 const EXT_VALIDATION_TS: &str = include_str!("../extension/src/validation.ts");
 const EXT_PROTOCOL_TS: &str = include_str!("../extension/src/protocol.ts");
-const EXT_BINARY_TS: &str = include_str!("../extension/src/binary.ts");
 
 fn command_path(name: &str) -> PathBuf {
     #[cfg(windows)]
@@ -183,6 +183,7 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::write(ext_dir.join("package.json"), EXT_PACKAGE_JSON)?;
         std::fs::write(ext_dir.join("tsconfig.json"), EXT_TSCONFIG)?;
         std::fs::write(src_dir.join("index.ts"), EXT_INDEX_TS)?;
+        std::fs::write(src_dir.join("binary.ts"), EXT_BINARY_TS)?;
         std::fs::write(src_dir.join("connection.ts"), EXT_CONNECTION_TS)?;
         std::fs::write(src_dir.join("websocket.ts"), EXT_WEBSOCKET_TS)?;
         std::fs::write(src_dir.join("tools.ts"), EXT_TOOLS_TS)?;

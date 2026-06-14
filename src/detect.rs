@@ -277,14 +277,29 @@ fn platform_default_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Random per-launch secret shared with the backend so only the launcher
+/// (or whoever it hands the secret to) can drive its runtime auth endpoints.
+pub fn generate_backend_control_secret() -> String {
+    use rand::Rng;
+    (0..32)
+        .map(|_| format!("{:02x}", rand::rngs::OsRng.gen::<u8>()))
+        .collect()
+}
+
 /// Launch the Python backend in headless mode.
 /// If `relay_enabled` is true, sets REALTIME_DESKTOP_BROKER_ENABLED=1 so
 /// the backend registers as a relay device with the gateway.
+///
+/// Sets MAGELAB_BACKEND_AUTH_SOURCE=cli so the backend may pull auth tokens
+/// and vault secrets via `mage internal` helper commands — that pull path
+/// is only enabled for backends mage launched intentionally. The control
+/// secret guards the backend's runtime auth endpoints.
 pub fn launch_backend_headless(
     bundle: &BackendBundle,
     host: &str,
     port: u16,
     relay_enabled: bool,
+    control_secret: &str,
 ) -> Result<Child> {
     // Log backend output to ~/.config/magelab/backend.log
     let log_dir = dirs::config_dir()
@@ -298,6 +313,29 @@ pub fn launch_backend_headless(
             Err(_) => (Stdio::null(), Stdio::null()),
         };
 
+    let mut cmd = build_backend_command(bundle, host, port, relay_enabled, control_secret);
+    cmd.stdin(Stdio::null())
+        .stdout(stdout_cfg)
+        .stderr(stderr_cfg);
+
+    let child = cmd.spawn().with_context(|| {
+        format!(
+            "Failed to launch backend from {}",
+            bundle.backend_dir.display()
+        )
+    })?;
+
+    Ok(child)
+}
+
+/// Build the backend launch command (separated from spawn for testability).
+fn build_backend_command(
+    bundle: &BackendBundle,
+    host: &str,
+    port: u16,
+    relay_enabled: bool,
+    control_secret: &str,
+) -> Command {
     let backend_arg = bundle.backend_dir.to_string_lossy().to_string();
     let port_arg = port.to_string();
     let mut cmd = Command::new(&bundle.python);
@@ -314,23 +352,19 @@ pub fn launch_backend_headless(
         "--log-level",
         "warning",
     ])
-    .current_dir(&bundle.backend_dir)
-    .stdin(Stdio::null())
-    .stdout(stdout_cfg)
-    .stderr(stderr_cfg);
+    .current_dir(&bundle.backend_dir);
+
+    cmd.env("MAGELAB_BACKEND_AUTH_SOURCE", "cli");
+    cmd.env("MAGELAB_BACKEND_CONTROL_SECRET", control_secret);
+    if let Ok(current_exe) = std::env::current_exe() {
+        cmd.env("MAGE_CLI_PATH", current_exe);
+    }
 
     if relay_enabled {
         cmd.env("REALTIME_DESKTOP_BROKER_ENABLED", "1");
     }
 
-    let child = cmd.spawn().with_context(|| {
-        format!(
-            "Failed to launch backend from {}",
-            bundle.backend_dir.display()
-        )
-    })?;
-
-    Ok(child)
+    cmd
 }
 
 /// Extract the port from an http(s) URL, defaulting to 11115.
@@ -389,4 +423,61 @@ pub async fn wait_for_backend(local_url: &str, timeout: Duration) -> Result<()> 
     }
 
     anyhow::bail!("Backend did not become healthy within {:?}", timeout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_bundle() -> BackendBundle {
+        BackendBundle {
+            kind: BackendBundleKind::DevRepo,
+            root: PathBuf::from("/tmp/magelab-test"),
+            api_dir: None,
+            backend_dir: PathBuf::from("/tmp/magelab-test/backend"),
+            python: PathBuf::from("python3"),
+        }
+    }
+
+    fn env_of(cmd: &Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(key))
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().to_string()))
+    }
+
+    #[test]
+    fn launch_sets_cli_auth_source_and_control_secret() {
+        let cmd = build_backend_command(&test_bundle(), "127.0.0.1", 11115, false, "feedc0de");
+        assert_eq!(
+            env_of(&cmd, "MAGELAB_BACKEND_AUTH_SOURCE").as_deref(),
+            Some("cli")
+        );
+        assert_eq!(
+            env_of(&cmd, "MAGELAB_BACKEND_CONTROL_SECRET").as_deref(),
+            Some("feedc0de")
+        );
+        assert!(
+            env_of(&cmd, "MAGE_CLI_PATH").is_some(),
+            "headless backend must receive the exact mage helper path for auth refresh"
+        );
+        assert_eq!(env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED"), None);
+    }
+
+    #[test]
+    fn launch_sets_relay_env_when_enabled() {
+        let cmd = build_backend_command(&test_bundle(), "127.0.0.1", 11115, true, "feedc0de");
+        assert_eq!(
+            env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED").as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn control_secret_is_random_hex() {
+        let a = generate_backend_control_secret();
+        let b = generate_backend_control_secret();
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
 }
