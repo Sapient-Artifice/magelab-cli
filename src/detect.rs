@@ -356,6 +356,9 @@ fn build_backend_command(
 
     cmd.env("MAGELAB_BACKEND_AUTH_SOURCE", "cli");
     cmd.env("MAGELAB_BACKEND_CONTROL_SECRET", control_secret);
+    if let Ok(current_exe) = std::env::current_exe() {
+        cmd.env("MAGE_CLI_PATH", current_exe);
+    }
 
     if relay_enabled {
         cmd.env("REALTIME_DESKTOP_BROKER_ENABLED", "1");
@@ -452,6 +455,10 @@ mod tests {
         assert_eq!(
             env_of(&cmd, "MAGELAB_BACKEND_CONTROL_SECRET").as_deref(),
             Some("feedc0de")
+        );
+        assert!(
+            env_of(&cmd, "MAGE_CLI_PATH").is_some(),
+            "headless backend must receive the exact mage helper path for auth refresh"
         );
         assert_eq!(env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED"), None);
     }

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { configPaths, findMageBinary } from "./binary.js";
 import { getConnection } from "./connection.js";
 import { BackendSocket, type ConfirmationRequest } from "./websocket.js";
 import { registerBackendTools } from "./tools.js";
@@ -8,13 +9,11 @@ import { ensureGatewayProvider } from "./gateway.js";
 import { registerCommands } from "./commands.js";
 import { isAllowedUrl, isAllowedFilepath } from "./validation.js";
 
+type NotificationLevel = "info" | "warning" | "error";
+
 /** Read auto_approve list from magelab CLI config */
 function loadAutoApproveList(): Set<string> {
-  const paths = [
-    join(homedir(), "Library", "Application Support", "magelab", "cli.toml"),
-    join(homedir(), ".config", "magelab", "cli.toml"),
-  ];
-  for (const p of paths) {
+  for (const p of configPaths()) {
     if (!existsSync(p)) continue;
     try {
       const content = readFileSync(p, "utf-8");
@@ -31,6 +30,18 @@ function loadAutoApproveList(): Set<string> {
 }
 
 export default async function (pi: any) {
+  const startupNotifications: { message: string; level: NotificationLevel }[] = [];
+  const notifyOnSessionStart = (message: string, level: NotificationLevel = "warning") => {
+    startupNotifications.push({ message, level });
+  };
+
+  pi.on("session_start", async (_event: unknown, ctx: any) => {
+    if (!ctx.hasUI) return;
+    for (const notification of startupNotifications.splice(0)) {
+      ctx.ui.notify(notification.message, notification.level);
+    }
+  });
+
   // 0a. Register renderer for MageLab response messages
   try {
     // @ts-ignore — resolved at runtime by Pi's jiti loader
@@ -94,27 +105,48 @@ export default async function (pi: any) {
   try {
     await ensureGatewayProvider();
   } catch (err) {
-    console.warn(`[magelab] Gateway provider setup failed: ${(err as Error).message ?? err}`);
+    const message = (err as Error).message ?? String(err);
+    console.warn(`[magelab] Gateway provider setup failed: ${message}`);
+    notifyOnSessionStart(`MageLab: gateway provider setup failed: ${message}`, "warning");
   }
 
-  // 2. Get connection info from magelab CLI.
+  // 2. Get connection info from mage CLI.
   // Retry up to 5 times (1.5 s apart) to allow a just-launched backend to
   // become ready.  Only bail out immediately on hard failures (binary not
   // found).  Transient subprocess errors or mode=="none" are retried.
   let conn;
+  let lastConnectionError: unknown;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       conn = await getConnection();
       if (conn.mode !== "none") break;
     } catch (err: any) {
+      lastConnectionError = err;
       // Binary not found — no point retrying.
-      if (err?.code === "ENOENT" || (err?.message as string)?.includes("not found")) return;
+      if (err?.code === "ENOENT" || (err?.message as string)?.includes("not found")) {
+        notifyOnSessionStart(`MageLab: ${err.message}`, "error");
+        return;
+      }
       // Any other error (e.g. subprocess crash) — retry.
     }
     if (attempt < 4) await new Promise((r) => setTimeout(r, 1500));
   }
 
-  if (!conn || conn.mode === "none" || conn.mode === "remote") {
+  if (!conn) {
+    const message = lastConnectionError instanceof Error
+      ? lastConnectionError.message
+      : "mage connect returned no connection info";
+    notifyOnSessionStart(`MageLab: unable to connect through mage CLI: ${message}`, "error");
+    return;
+  }
+
+  if (conn.mode === "none") {
+    notifyOnSessionStart("MageLab: backend is not running. Run: mage launch --wait", "warning");
+    return;
+  }
+
+  if (conn.mode === "remote") {
+    notifyOnSessionStart("MageLab: remote mode is active; Pi extension needs local or relay mode.", "warning");
     return;
   }
 
@@ -122,7 +154,9 @@ export default async function (pi: any) {
   let socket: BackendSocket;
   try {
     socket = await BackendSocket.connect(conn.url!, conn.token);
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    notifyOnSessionStart(`MageLab: WebSocket connection failed: ${message}`, "error");
     return;
   }
 
@@ -480,11 +514,7 @@ export default async function (pi: any) {
       try {
         const { execFile: ef } = await import("node:child_process");
         const { promisify: p } = await import("node:util");
-        const { existsSync: ex } = await import("node:fs");
-        const { join: j } = await import("node:path");
-        const { homedir: hd } = await import("node:os");
-        const cargoPath = j(hd(), ".cargo", "bin", "magelab");
-        const bin = ex(cargoPath) ? cargoPath : "magelab";
+        const bin = findMageBinary();
         const { stdout } = await p(ef)(bin, ["balance"]);
         const balanceMatch = stdout.match(/(\$[\d.]+|\d+\.\d+)/);
         if (balanceMatch) {
@@ -523,12 +553,12 @@ export default async function (pi: any) {
 
     if (event.status === 402) {
       ctx.ui.notify(
-        "MageLab: no credits remaining. Add credits at magelab.ai or run: magelab balance",
+        "MageLab: no credits remaining. Add credits at magelab.ai or run: mage balance",
         "error"
       );
     } else if (event.status === 401) {
       ctx.ui.notify(
-        "MageLab: authentication failed. Run: magelab login",
+        "MageLab: authentication failed. Run: mage login",
         "error"
       );
     } else if (event.status === 429) {
