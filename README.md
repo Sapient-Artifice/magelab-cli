@@ -212,7 +212,7 @@ magelab_home = "/Applications/magelab.app"
 Credentials use the system keychain by default (macOS Keychain, Linux secret service, Windows Credential Manager). Non-keychain modes must be explicit:
 
 - `MAGELAB_AUTH_MODE=keychain` or unset: use the system keychain.
-- `MAGELAB_AUTH_MODE=file`: use `~/.config/magelab/credentials.json` with restrictive file permissions for headless systems.
+- `MAGELAB_AUTH_MODE=file`: use the platform config credentials file with restrictive file permissions for headless systems (`~/.config/magelab/credentials.json` on macOS/Linux, `%APPDATA%\magelab\credentials.json` on Windows).
 - `MAGELAB_AUTH_MODE=env`: read `MAGELAB_ACCESS_TOKEN` and optionally `MAGELAB_REFRESH_TOKEN` without writing credentials.
 
 Production runs should use keychain mode. File mode is intended for headless or CI-style environments where a secure OS credential store is unavailable.

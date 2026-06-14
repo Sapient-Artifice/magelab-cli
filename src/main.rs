@@ -163,7 +163,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthAction {
-    /// Print auth token to stdout. Uses JWT if valid, attempts refresh if expired, falls back to API key from config.
+    /// Print auth token to stdout. Resolves via the chain:
+    /// JWT → refresh → vault (interactive only) → MAGELAB_API_KEY env. Used by
+    /// the Pi extension's `"!mage auth token"` reference, resolved per request.
     Token,
 }
 
@@ -244,14 +246,6 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
-    // Warn if plaintext API key exists in cli.toml (deprecated)
-    if config.api_key.is_some() {
-        eprintln!(
-            "Warning: Plaintext API key in cli.toml is deprecated.\n\
-             Set it in the desktop app or use MAGELAB_API_KEY env var instead."
-        );
-    }
-
     if config.telemetry() {
         analytics::init().await;
     }
@@ -273,6 +267,17 @@ async fn main() -> Result<()> {
         Commands::Internal { action } => cmd_internal(&config, action).await,
         Commands::Auth { action } => match action {
             AuthAction::Token => {
+                // NOTE: TouchID gates this only in an interactive terminal.
+                // touchid::verify() is a no-op when stdin is not a TTY
+                // (is_available() returns false), so the per-request invocations
+                // Pi makes via "!mage auth token" run non-interactively and do
+                // NOT prompt for biometrics. Interactive `mage auth token` still
+                // prompts (Tier::Cached, 5-minute session cache).
+                //
+                // Because of that, non-interactive callers only ever receive a
+                // short-lived JWT or their own MAGELAB_API_KEY env var — the
+                // long-lived vault API key is interactive-only (see
+                // auth::get_token), so it stays behind the biometric gate.
                 auth::touchid::verify(auth::touchid::Tier::Cached, "access auth token")?;
                 cmd_auth_token(&config).await
             }
@@ -287,7 +292,19 @@ async fn main() -> Result<()> {
             ws,
         } => {
             auth::touchid::verify(auth::touchid::Tier::Cached, "connect")?;
-            cmd_connect(&config, json, no_launch, local, relay, remote, url, ws).await
+            cmd_connect(
+                &config,
+                ConnectOptions {
+                    json,
+                    no_launch,
+                    local,
+                    relay,
+                    remote,
+                    url,
+                    ws,
+                },
+            )
+            .await
         }
         Commands::Launch {
             wait,
@@ -407,29 +424,14 @@ fn cmd_logout(_config: &Config) -> Result<()> {
 }
 
 async fn cmd_auth_token(config: &Config) -> Result<()> {
-    let creds = auth::Credentials::load()?;
-    if !creds.is_token_valid() {
-        if let Some(refresh) = &creds.refresh_token {
-            let mut new_creds =
-                magelab_core::auth::refresh_token(&config.gateway_url, refresh).await?;
-            if new_creds.refresh_token.is_none() {
-                new_creds.refresh_token = Some(refresh.clone());
-            }
-            auth::save_refreshed_credentials(&new_creds)?;
-            if let Some(token) = &new_creds.access_token {
-                print!("{}", token); // No newline — for piping
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Token expired and refresh failed. Run: mage login");
-    }
-    match &creds.access_token {
-        Some(token) => {
-            print!("{}", token);
-            Ok(())
-        }
-        None => anyhow::bail!("Not logged in. Run: mage login"),
-    }
+    // Delegate to the canonical fallback chain so a single `mage auth token`
+    // covers every credential source the Pi extension relies on:
+    //   JWT → refresh → vault (interactive only) → MAGELAB_API_KEY env → error.
+    // Pi's models.json points apiKey at "!mage auth token" and resolves it per
+    // request, so this command must always print the best available token.
+    let token = auth::get_token(config).await?;
+    print!("{}", token); // No newline — for piping
+    Ok(())
 }
 
 async fn cmd_internal(config: &Config, action: InternalAction) -> Result<()> {
@@ -496,8 +498,7 @@ async fn cmd_internal(config: &Config, action: InternalAction) -> Result<()> {
     }
 }
 
-async fn cmd_connect(
-    config: &Config,
+struct ConnectOptions {
     json: bool,
     no_launch: bool,
     local: bool,
@@ -505,7 +506,18 @@ async fn cmd_connect(
     remote: bool,
     url: Option<String>,
     ws: Option<String>,
-) -> Result<()> {
+}
+
+async fn cmd_connect(config: &Config, opts: ConnectOptions) -> Result<()> {
+    let ConnectOptions {
+        json,
+        no_launch,
+        local,
+        relay,
+        remote,
+        url,
+        ws,
+    } = opts;
     let has_url_override = url.is_some() || ws.is_some();
     let local_url = if let Some(ws_url) = ws {
         connect::direct_ws_to_http_url(&ws_url)?
@@ -810,12 +822,10 @@ fn terminate_process(pid: u32, force: bool) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn terminate_process(pid: u32, force: bool) -> Result<()> {
-    let mut args = vec!["/PID".to_string(), pid.to_string(), "/T".to_string()];
-    if force {
-        args.push("/F".to_string());
-    }
-    let status = Command::new("taskkill").args(args).status()?;
+fn terminate_process(pid: u32, _force: bool) -> Result<()> {
+    let status = Command::new("taskkill")
+        .args(windows_taskkill_args(pid))
+        .status()?;
     if status.success() {
         Ok(())
     } else {
@@ -838,12 +848,35 @@ fn kill_process(pid: u32) -> Result<()> {
 #[cfg(windows)]
 fn kill_process(pid: u32) -> Result<()> {
     let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(windows_taskkill_args(pid))
         .status()?;
     if status.success() {
         Ok(())
     } else {
         anyhow::bail!("Failed to kill backend process {}", pid)
+    }
+}
+
+#[cfg(windows)]
+fn windows_taskkill_args(pid: u32) -> [String; 4] {
+    ["/PID".into(), pid.to_string(), "/T".into(), "/F".into()]
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_taskkill_args_force_process_tree() {
+        assert_eq!(
+            windows_taskkill_args(1234),
+            [
+                "/PID".to_string(),
+                "1234".to_string(),
+                "/T".to_string(),
+                "/F".to_string()
+            ]
+        );
     }
 }
 

@@ -11,7 +11,6 @@ fn config_with_local(local_url: &str) -> Config {
     Config {
         local_url: local_url.to_string(),
         gateway_url: "https://api.magelab.ai".to_string(),
-        api_key: None,
         magelab_home: None,
         ..Config::default()
     }

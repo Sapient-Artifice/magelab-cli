@@ -1,4 +1,6 @@
 use std::io::Write;
+
+use serial_test::serial;
 use tempfile::TempDir;
 
 #[test]
@@ -28,7 +30,6 @@ auto_approve = ["read_file"]
     .unwrap();
 
     let config = magelab_cli::config::Config::load_from(config_path).unwrap();
-    assert_eq!(config.api_key, Some("mage_test123".to_string()));
     assert_eq!(config.default_model, "gpt-4o");
     assert_eq!(config.gateway_url, "https://custom.api.com");
     assert_eq!(config.prefer, "remote");
@@ -47,41 +48,31 @@ fn test_save_config() {
 }
 
 #[test]
-fn test_api_key_not_serialized_but_still_deserializable() {
-    // api_key should not appear in serialized output
+fn test_legacy_api_key_deserializes_but_is_not_serialized() {
     let dir = TempDir::new().unwrap();
     let config_path = dir.path().join("cli.toml");
-
-    let mut config = magelab_cli::config::Config::default();
-    config.api_key = Some("mage_legacy".to_string());
-    config.save_to(&config_path).unwrap();
-
-    let contents = std::fs::read_to_string(&config_path).unwrap();
-    assert!(
-        !contents.contains("mage_legacy"),
-        "api_key should not be serialized"
-    );
-
-    // But old configs with api_key can still be loaded
-    let dir2 = TempDir::new().unwrap();
-    let config_path2 = dir2.path().join("cli.toml");
-    let mut f = std::fs::File::create(&config_path2).unwrap();
+    let mut f = std::fs::File::create(&config_path).unwrap();
     writeln!(f, r#"api_key = "mage_old_key""#).unwrap();
 
-    let loaded = magelab_cli::config::Config::load_from(config_path2).unwrap();
-    assert_eq!(loaded.api_key, Some("mage_old_key".to_string()));
+    let loaded = magelab_cli::config::Config::load_from(&config_path).unwrap();
+    loaded.save_to(&config_path).unwrap();
+
+    let contents = std::fs::read_to_string(&config_path).unwrap();
+    assert!(!contents.contains("api_key"));
+    assert!(!contents.contains("mage_old_key"));
 }
 
 #[test]
+#[serial]
 fn test_api_key_method_only_returns_env_var() {
     let config = magelab_cli::config::Config::default();
-    // api_key() should NOT return config file value, only env var
-    let mut config_with_key = config;
-    config_with_key.api_key = Some("config_value".to_string());
-    // Without MAGELAB_API_KEY env var set, should return None
-    // (can't safely test with env var in parallel tests)
-    // Just verify the method exists and returns Option<String>
-    let _result: Option<String> = config_with_key.api_key();
+
+    std::env::remove_var("MAGELAB_API_KEY");
+    assert_eq!(config.api_key(), None);
+
+    std::env::set_var("MAGELAB_API_KEY", "env_value");
+    assert_eq!(config.api_key().as_deref(), Some("env_value"));
+    std::env::remove_var("MAGELAB_API_KEY");
 }
 
 #[test]

@@ -38,13 +38,32 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
         }
 
         if let Some(refresh) = &creds.refresh_token {
-            if let Ok(mut new_creds) = magelab_core::auth::refresh_token(gateway_url, refresh).await
-            {
-                if new_creds.refresh_token.is_none() {
-                    new_creds.refresh_token = Some(refresh.clone());
+            match magelab_core::auth::refresh_token(gateway_url, refresh).await {
+                Ok(mut new_creds) => {
+                    if new_creds.refresh_token.is_none() {
+                        new_creds.refresh_token = Some(refresh.clone());
+                    }
+                    save_refreshed_credentials(&new_creds).ok();
+                    return new_creds.access_token;
                 }
-                save_refreshed_credentials(&new_creds).ok();
-                return new_creds.access_token;
+                Err(_) => {
+                    // Refresh failed. A concurrent `mage auth token` (Pi resolves
+                    // "!mage auth token" per request) may have just rotated the
+                    // single-use refresh token and saved fresh credentials. Re-read
+                    // once (bypassing this process's cache): if the stored creds
+                    // CHANGED, a concurrent winner wrote them — use them if valid.
+                    // If unchanged, the token is simply expired/revoked (no winner),
+                    // so bail immediately rather than adding latency to the
+                    // per-request hot path. (The tight simultaneous window where the
+                    // winner hasn't saved yet is picked up on Pi's next request.)
+                    if let Ok(reloaded) = Credentials::reload() {
+                        let changed = reloaded.access_token != creds.access_token
+                            || reloaded.expires_at != creds.expires_at;
+                        if changed && reloaded.is_token_valid() {
+                            return reloaded.access_token;
+                        }
+                    }
+                }
             }
         }
     }
@@ -53,28 +72,33 @@ pub async fn get_valid_jwt(creds: &Credentials, gateway_url: &str) -> Option<Str
 
 /// Get the best available auth token.
 ///
-/// Fallback chain: JWT → refresh → vault → MAGELAB_API_KEY env var → error
+/// Fallback chain: JWT → refresh → vault (interactive only) →
+/// MAGELAB_API_KEY env var → error
 pub async fn get_token(config: &Config) -> Result<String> {
     let creds = Credentials::load().unwrap_or_default();
     if let Some(token) = get_valid_jwt(&creds, &config.gateway_url).await {
         return Ok(token);
     }
-    if creds.access_token.is_some() {
-        eprintln!("Warning: JWT expired and refresh failed. Falling back to API key.");
-    }
+    // No stderr warning here: `mage auth token` is invoked per request by the
+    // Pi extension, and Pi may capture/treat subprocess stderr as failure.
+    // Stay silent and fall through to the next credential source.
 
-    // Try vault
-    if let Ok(v) = magelab_core::vault::Vault::open() {
-        if let Ok(Some(key)) = v.get("magelab_api_key") {
-            return Ok(key);
-        }
-    }
-
-    // Env var fallback
-    if let Ok(key) = std::env::var("MAGELAB_API_KEY") {
-        if !key.is_empty() {
-            return Ok(key);
-        }
+    // Static fallback. The vault (long-lived API key) is only consulted
+    // interactively: TouchID cannot gate a non-TTY caller, so without this
+    // check any local process could harvest the vault key by spawning
+    // `mage auth token`. The env var remains available to non-interactive
+    // callers — it is the caller's own environment.
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    if let Some(token) = magelab_core::auth::static_token_fallback(
+        interactive,
+        || {
+            magelab_core::vault::Vault::open()
+                .ok()
+                .and_then(|v| v.get("magelab_api_key").ok().flatten())
+        },
+        std::env::var("MAGELAB_API_KEY").ok(),
+    ) {
+        return Ok(token);
     }
 
     anyhow::bail!("Not authenticated. Run: mage login")
