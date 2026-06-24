@@ -31,13 +31,13 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: Sapient-Artifice/magelab
           ref: main
           token: ${{ secrets.MAGELAB_READ_TOKEN }}
       - name: Overlay CLI source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: magelab-cli
 
