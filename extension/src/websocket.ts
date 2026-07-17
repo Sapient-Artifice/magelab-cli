@@ -36,6 +36,7 @@ interface PendingRequest {
   resolve: (msg: ServerMessage) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  expectedTypes: Set<string>;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -46,10 +47,11 @@ export class BackendSocket {
   private ws: ReconnectingWebSocket;
   private handlers = new Map<string, ((msg: ServerMessage) => void)[]>();
   private pendingByCallId = new Map<string, PendingRequest>();
-  private pendingByType = new Map<string, PendingRequest[]>();
+  private pendingByRequestId = new Map<string, PendingRequest>();
+  private pendingByType = new Map<string, PendingRequest>();
   private _closed = false;
   private _state: ConnectionState = "connected";
-  private _onStateChange?: (state: ConnectionState) => void;
+  private stateHandlers = new Set<(state: ConnectionState) => void>();
 
   private constructor(ws: ReconnectingWebSocket) {
     this.ws = ws;
@@ -70,7 +72,7 @@ export class BackendSocket {
       if (this._state === "disconnected") return;
       this._closed = true;
       this._state = "reconnecting";
-      this._onStateChange?.("reconnecting");
+      this.emitState("reconnecting");
       this.rejectAll("WebSocket closed");
     });
 
@@ -78,7 +80,7 @@ export class BackendSocket {
       if (this._state === "reconnecting") {
         this._closed = false;
         this._state = "connected";
-        this._onStateChange?.("connected");
+        this.emitState("connected");
       }
     });
 
@@ -139,12 +141,13 @@ export class BackendSocket {
     return this._state;
   }
 
-  onStateChange(cb: (state: ConnectionState) => void): void {
-    this._onStateChange = cb;
+  onStateChange(cb: (state: ConnectionState) => void): () => void {
+    this.stateHandlers.add(cb);
+    return () => this.stateHandlers.delete(cb);
   }
 
   send(msg: ClientMessage): void {
-    if (this._closed) return;
+    if (this._closed) throw new Error("Backend disconnected");
     this.ws.send(JSON.stringify(msg));
   }
 
@@ -175,8 +178,59 @@ export class BackendSocket {
         resolve: resolve as (msg: ServerMessage) => void,
         reject,
         timer,
+        expectedTypes: new Set(["tool_call_result"]),
       });
       this.send(msg);
+    });
+  }
+
+  requestById<T extends ServerMessage>(
+    msg: ClientMessage & { request_id?: string },
+    expectedTypes: string | string[],
+    timeoutMs = 30_000
+  ): Promise<T> {
+    if (this._closed) {
+      return Promise.reject(new Error("Backend disconnected"));
+    }
+
+    const requestId = msg.request_id || randomUUID();
+    if (!requestId.trim() || Buffer.byteLength(requestId, "utf8") > 256) {
+      return Promise.reject(
+        new Error("request_id must be non-empty and at most 256 UTF-8 bytes")
+      );
+    }
+    if (this.pendingByRequestId.has(requestId)) {
+      return Promise.reject(new Error(`Duplicate request_id: ${requestId}`));
+    }
+    msg.request_id = requestId;
+    const expected = new Set(
+      Array.isArray(expectedTypes) ? expectedTypes : [expectedTypes]
+    );
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingByRequestId.delete(requestId);
+        reject(
+          new Error(
+            `Request ${requestId} timed out waiting for ${[...expected].join(" or ")}`
+          )
+        );
+      }, timeoutMs);
+
+      this.pendingByRequestId.set(requestId, {
+        resolve: resolve as (msg: ServerMessage) => void,
+        reject,
+        timer,
+        expectedTypes: expected,
+      });
+
+      try {
+        this.send(msg);
+      } catch (error) {
+        clearTimeout(timer);
+        this.pendingByRequestId.delete(requestId);
+        reject(error);
+      }
     });
   }
 
@@ -190,31 +244,62 @@ export class BackendSocket {
     }
 
     return new Promise((resolve, reject) => {
+      if (this.pendingByType.has(expectedType)) {
+        reject(
+          new Error(
+            `Only one uncorrelated ${expectedType} request may be in flight`
+          )
+        );
+        return;
+      }
+
       const entry: PendingRequest = {
         resolve: resolve as (msg: ServerMessage) => void,
         reject,
         timer: setTimeout(() => {
-          const queue = this.pendingByType.get(expectedType);
-          if (queue) {
-            const idx = queue.indexOf(entry);
-            if (idx !== -1) queue.splice(idx, 1);
-            if (queue.length === 0) this.pendingByType.delete(expectedType);
-          }
+          this.pendingByType.delete(expectedType);
           reject(new Error(`Request timed out waiting for ${expectedType}`));
         }, timeoutMs),
+        expectedTypes: new Set([expectedType]),
       };
 
-      const queue = this.pendingByType.get(expectedType) || [];
-      queue.push(entry);
-      this.pendingByType.set(expectedType, queue);
-      this.send(msg);
+      this.pendingByType.set(expectedType, entry);
+      try {
+        this.send(msg);
+      } catch (error) {
+        clearTimeout(entry.timer);
+        this.pendingByType.delete(expectedType);
+        reject(error);
+      }
     });
   }
 
-  on(type: string, handler: (msg: ServerMessage) => void): void {
+  on(type: string, handler: (msg: ServerMessage) => void): () => void {
     const list = this.handlers.get(type) || [];
     list.push(handler);
     this.handlers.set(type, list);
+    return () => {
+      const current = this.handlers.get(type);
+      if (!current) return;
+      const index = current.indexOf(handler);
+      if (index !== -1) current.splice(index, 1);
+      if (current.length === 0) this.handlers.delete(type);
+    };
+  }
+
+  listenerCount(type?: string): number {
+    if (type) return this.handlers.get(type)?.length || 0;
+    let count = 0;
+    for (const handlers of this.handlers.values()) count += handlers.length;
+    return count;
+  }
+
+  pendingCount(): number {
+    return (
+      this.pendingByCallId.size +
+      this.pendingByRequestId.size +
+      this.pendingByType.size
+    );
   }
 
   close(): void {
@@ -224,28 +309,60 @@ export class BackendSocket {
     if (this._closed && this._state === "disconnected") return;
     this._closed = true;
     this._state = "disconnected";
+    this.emitState("disconnected");
     this.rejectAll("WebSocket closed");
     this.ws.close();
   }
 
   private dispatch(msg: ServerMessage): void {
+    let resolved = false;
+
     if ("call_id" in msg && typeof msg.call_id === "string") {
       const pending = this.pendingByCallId.get(msg.call_id);
-      if (pending) {
+      if (pending && pending.expectedTypes.has(msg.type)) {
         this.pendingByCallId.delete(msg.call_id);
         clearTimeout(pending.timer);
         pending.resolve(msg);
-        return;
+        resolved = true;
       }
     }
 
-    const typeQueue = this.pendingByType.get(msg.type);
-    if (typeQueue && typeQueue.length > 0) {
-      const pendingType = typeQueue.shift()!;
-      if (typeQueue.length === 0) this.pendingByType.delete(msg.type);
+    if (
+      "request_id" in msg &&
+      typeof msg.request_id === "string" &&
+      !resolved
+    ) {
+      const pending = this.pendingByRequestId.get(msg.request_id);
+      if (pending && pending.expectedTypes.has(msg.type)) {
+        this.pendingByRequestId.delete(msg.request_id);
+        clearTimeout(pending.timer);
+        pending.resolve(msg);
+        resolved = true;
+      }
+    }
+
+    if (!("request_id" in msg) && !resolved) {
+      const candidates = [...this.pendingByRequestId.entries()].filter(([, pending]) =>
+        pending.expectedTypes.has(msg.type)
+      );
+      if (candidates.length === 1) {
+        const [requestId, pending] = candidates[0];
+        this.pendingByRequestId.delete(requestId);
+        clearTimeout(pending.timer);
+        pending.reject(
+          new Error(
+            `Backend response ${msg.type} did not echo request_id; Mage v0.12.0 or newer is required`
+          )
+        );
+        resolved = true;
+      }
+    }
+
+    const pendingType = this.pendingByType.get(msg.type);
+    if (pendingType && !resolved) {
+      this.pendingByType.delete(msg.type);
       clearTimeout(pendingType.timer);
       pendingType.resolve(msg);
-      return;
     }
 
     const handlers = this.handlers.get(msg.type);
@@ -263,12 +380,20 @@ export class BackendSocket {
     }
     this.pendingByCallId.clear();
 
-    for (const [, queue] of this.pendingByType) {
-      for (const pending of queue) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error(reason));
-      }
+    for (const [, pending] of this.pendingByRequestId) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    this.pendingByRequestId.clear();
+
+    for (const [, pending] of this.pendingByType) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
     }
     this.pendingByType.clear();
+  }
+
+  private emitState(state: ConnectionState): void {
+    for (const handler of this.stateHandlers) handler(state);
   }
 }

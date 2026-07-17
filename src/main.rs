@@ -5,6 +5,7 @@ mod client;
 mod config;
 mod connect;
 mod detect;
+mod headless_commands;
 mod settings;
 mod setup_pi;
 mod ui;
@@ -143,6 +144,58 @@ enum Commands {
         #[command(subcommand)]
         action: Option<SettingsAction>,
     },
+    /// Manage durable Mage sessions
+    Sessions {
+        #[command(subcommand)]
+        action: SessionsAction,
+    },
+    /// Manage Mage chats through the acknowledged WebSocket protocol
+    Chats {
+        #[command(subcommand)]
+        action: ChatsAction,
+    },
+    /// Run one complete correlated Mage assistant turn
+    Ask {
+        /// Prompt text
+        prompt: String,
+        /// Durable Mage session id
+        #[arg(long)]
+        session: i64,
+        /// Existing Mage chat id
+        #[arg(long, conflicts_with = "new_chat")]
+        chat: Option<i64>,
+        /// Create and confirm a new chat before sending the prompt
+        #[arg(long)]
+        new_chat: bool,
+        /// Session-scoped model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Session-scoped system message
+        #[arg(long)]
+        system_message: Option<String>,
+        /// Session-scoped developer instructions
+        #[arg(long)]
+        developer_instructions: Option<String>,
+        /// Enable an MCP server for the session; repeat for multiple servers
+        #[arg(long = "mcp", action = clap::ArgAction::Append)]
+        mcps: Vec<String>,
+        /// Print only the final result as JSON
+        #[arg(long, conflicts_with = "jsonl")]
+        json: bool,
+        /// Stream events as JSON Lines
+        #[arg(long)]
+        jsonl: bool,
+    },
+    /// Inspect Mage storage diagnostics
+    Storage {
+        #[command(subcommand)]
+        action: StorageAction,
+    },
+    /// Inspect the headless client protocol contract
+    Protocol {
+        #[command(subcommand)]
+        action: ProtocolAction,
+    },
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -218,6 +271,80 @@ enum SettingsAction {
 }
 
 #[derive(Subcommand)]
+enum SessionsAction {
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        session_id: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        #[arg(long, default_value = "headless")]
+        name: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long = "mcp", action = clap::ArgAction::Append)]
+        mcps: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Update {
+        session_id: i64,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long = "mcp", action = clap::ArgAction::Append)]
+        mcps: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChatsAction {
+    List {
+        #[arg(long)]
+        session: Option<i64>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        #[arg(long)]
+        session: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    Switch {
+        #[arg(long)]
+        session: i64,
+        #[arg(long)]
+        chat: i64,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum StorageAction {
+    Health {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProtocolAction {
+    Capabilities {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum VaultAction {
     /// Print a secret value to stdout
     Get {
@@ -242,7 +369,14 @@ impl VaultAction {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("Error: {error:#}");
+        std::process::exit(headless_commands::process_exit_code(&error).unwrap_or(1));
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let mut config = Config::load().unwrap_or_default();
 
@@ -356,6 +490,98 @@ async fn main() -> Result<()> {
         }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
+        Commands::Sessions { action } => {
+            let command = match action {
+                SessionsAction::List { json } => headless_commands::SessionsCommand::List { json },
+                SessionsAction::Get { session_id, json } => {
+                    headless_commands::SessionsCommand::Get { session_id, json }
+                }
+                SessionsAction::Create {
+                    name,
+                    model,
+                    mcps,
+                    json,
+                } => headless_commands::SessionsCommand::Create {
+                    name,
+                    model,
+                    mcps,
+                    json,
+                },
+                SessionsAction::Update {
+                    session_id,
+                    name,
+                    model,
+                    mcps,
+                    json,
+                } => headless_commands::SessionsCommand::Update {
+                    session_id,
+                    name,
+                    model,
+                    mcps,
+                    json,
+                },
+            };
+            headless_commands::sessions(&config, command).await
+        }
+        Commands::Chats { action } => {
+            let command = match action {
+                ChatsAction::List { session, json } => headless_commands::ChatsCommand::List {
+                    session_id: session,
+                    json,
+                },
+                ChatsAction::Create { session, json } => headless_commands::ChatsCommand::Create {
+                    session_id: session,
+                    json,
+                },
+                ChatsAction::Switch {
+                    session,
+                    chat,
+                    json,
+                } => headless_commands::ChatsCommand::Switch {
+                    session_id: session,
+                    chat_id: chat,
+                    json,
+                },
+            };
+            headless_commands::chats(&config, command).await
+        }
+        Commands::Ask {
+            prompt,
+            session,
+            chat,
+            new_chat,
+            model,
+            system_message,
+            developer_instructions,
+            mcps,
+            json,
+            jsonl,
+        } => {
+            headless_commands::ask(
+                &config,
+                headless_commands::AskCommand {
+                    prompt,
+                    session_id: session,
+                    chat_id: chat,
+                    new_chat,
+                    model,
+                    system_message,
+                    developer_instructions,
+                    mcps,
+                    json,
+                    jsonl,
+                },
+            )
+            .await
+        }
+        Commands::Storage { action } => match action {
+            StorageAction::Health { json } => {
+                headless_commands::storage_health(&config, json).await
+            }
+        },
+        Commands::Protocol { action } => match action {
+            ProtocolAction::Capabilities { json } => headless_commands::protocol_capabilities(json),
+        },
         Commands::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "mage", &mut std::io::stdout());
             Ok(())

@@ -8,6 +8,7 @@ import { registerBackendTools } from "./tools.js";
 import { ensureGatewayProvider } from "./gateway.js";
 import { registerCommands } from "./commands.js";
 import { isAllowedUrl, isAllowedFilepath } from "./validation.js";
+import { MageClient } from "./client/index.js";
 
 /** Read auto_approve list from magelab CLI config */
 function loadAutoApproveList(): Set<string> {
@@ -182,6 +183,7 @@ export default async function (pi: any) {
     fireSessionStart();
     return;
   }
+  const client = new MageClient({ socket, token: conn.token });
 
   // 4. Permission gate for tool confirmations
   const autoApprove = loadAutoApproveList();
@@ -336,7 +338,7 @@ export default async function (pi: any) {
   }
 
   // 8. Register /magelab command and skill slash commands
-  const commandCount = registerCommands(pi, socket);
+  const commandCount = registerCommands(pi, socket, client);
 
   // 8b. MageLab mode flag — when true, magelab-backend provider is active
   let magelabMode = true;
@@ -386,108 +388,54 @@ export default async function (pi: any) {
             const messages = context.messages || [];
             const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
             const text = lastUser?.content?.[0]?.text || lastUser?.content || "";
-            if (text) {
-              socket.send({ type: "text", text: typeof text === "string" ? text : JSON.stringify(text) });
-            }
-
-            // Stream tokens as they arrive from the backend
             output.content.push({ type: "text", text: "" });
             let textStarted = false;
             const signal = options?.signal;
+            if (!text) throw new Error("MageLab provider received no user text");
+            const turn = client.runTurn({
+              text: typeof text === "string" ? text : JSON.stringify(text),
+              signal,
+            });
 
-            await new Promise<void>((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error("Backend did not respond within 120s")), 120_000);
-
-              // Handle abort (Esc key)
-              signal?.addEventListener("abort", () => {
-                clearTimeout(timeout);
-                socket.send({ type: "control", action: "stop" });
-                resolve();
-              });
-
-              const finish = () => {
-                clearTimeout(timeout);
-                if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setStatus("magelab-tool", undefined);
-                  sessionCtx.ui.setStatus("magelab-subagent", undefined);
-                }
-                if (textStarted) {
-                  stream.push({ type: "text_end", contentIndex: 0, content: output.content[0].text, partial: output });
-                }
-                resolve();
-              };
-
-              // Streaming tokens (when backend has stream: true)
-              socket.on("assistant_stream", (msg: any) => {
-                if (msg.phase === "start") {
+            for await (const msg of turn.events) {
+              if (msg.type === "assistant_stream") {
+                if (msg.phase === "start" && !textStarted) {
                   textStarted = true;
                   stream.push({ type: "text_start", contentIndex: 0, partial: output });
                 } else if (msg.phase === "delta" && msg.token) {
+                  if (!textStarted) {
+                    textStarted = true;
+                    stream.push({ type: "text_start", contentIndex: 0, partial: output });
+                  }
                   output.content[0].text += msg.token;
                   stream.push({ type: "text_delta", contentIndex: 0, delta: msg.token, partial: output });
-                } else if (msg.phase === "end") {
-                  // Stream end — finish
-                  finish();
                 }
-              });
-
-              // Non-streaming (backend sends complete text at once)
-              socket.on("assistant", (msg: any) => {
+              } else if (msg.type === "assistant") {
                 if (msg.text) {
-                  output.content[0].text = msg.text;
                   if (!textStarted) {
                     stream.push({ type: "text_start", contentIndex: 0, partial: output });
                     textStarted = true;
                   }
+                  output.content[0].text += msg.text;
                   stream.push({ type: "text_delta", contentIndex: 0, delta: msg.text, partial: output });
-                  finish();
                 }
-              });
+              }
+            }
 
-              // Tool execution status — use setWorkingMessage which
-              // is visible during streaming (setStatus is not)
-              socket.on("confirmation_request", (msg: any) => {
-                if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setWorkingMessage(`Running ${msg.function_name}...`);
-                }
-              });
-
-              socket.on("tool_result", (msg: any) => {
-                if (sessionCtx?.hasUI) {
-                  const name = msg.function_name || "tool";
-                  sessionCtx.ui.setWorkingMessage(`${name} done`);
-                }
-              });
-
-              socket.on("tool_debug", (msg: any) => {
-                if (sessionCtx?.hasUI && msg.message_type === "tool_call" && msg.content) {
-                  sessionCtx.ui.setWorkingMessage(msg.content.slice(0, 80));
-                }
-              });
-
-              // Subagent progress
-              socket.on("subagent_update", (msg: any) => {
-                if (sessionCtx?.hasUI) {
-                  const label = msg.progress
-                    ? `${msg.name}: ${msg.progress}`
-                    : `${msg.name}: ${msg.status || "running"}`;
-                  sessionCtx.ui.setWorkingMessage(label);
-                }
-              });
-
-              socket.on("subagent_complete", (msg: any) => {
-                if (sessionCtx?.hasUI) {
-                  sessionCtx.ui.setWorkingMessage(`${msg.name}: done`);
-                }
-              });
-
-              // Done signal (streaming mode)
-              socket.on("assistant_complete", () => {
-                finish();
-              });
-            });
-
-            stream.push({ type: "done", reason: "stop", message: output });
+            const result = await turn.completed;
+            if (sessionCtx?.hasUI) {
+              sessionCtx.ui.setStatus("magelab-tool", undefined);
+              sessionCtx.ui.setStatus("magelab-subagent", undefined);
+            }
+            if (textStarted) {
+              stream.push({ type: "text_end", contentIndex: 0, content: output.content[0].text, partial: output });
+            }
+            if (result.status === "error") {
+              throw new Error(result.error || result.code || "MageLab assistant turn failed");
+            }
+            const reason = result.status === "cancelled" ? "aborted" : "stop";
+            output.stopReason = reason;
+            stream.push({ type: "done", reason, message: output });
             stream.end();
           } catch (err: any) {
             output.stopReason = "error";

@@ -18,6 +18,9 @@ const EXT_GATEWAY_TS: &str = include_str!("../extension/src/gateway.ts");
 const EXT_COMMANDS_TS: &str = include_str!("../extension/src/commands.ts");
 const EXT_VALIDATION_TS: &str = include_str!("../extension/src/validation.ts");
 const EXT_PROTOCOL_TS: &str = include_str!("../extension/src/protocol.ts");
+const EXT_CLIENT_INDEX_TS: &str = include_str!("../extension/src/client/index.ts");
+const EXT_CLIENT_ERRORS_TS: &str = include_str!("../extension/src/client/errors.ts");
+const EXT_CLIENT_COORDINATOR_TS: &str = include_str!("../extension/src/client/coordinator.ts");
 
 fn command_path(name: &str) -> PathBuf {
     #[cfg(windows)]
@@ -177,7 +180,9 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
 
         // Create directory structure
         let src_dir = ext_dir.join("src");
+        let client_dir = src_dir.join("client");
         std::fs::create_dir_all(&src_dir)?;
+        std::fs::create_dir_all(&client_dir)?;
 
         // Write embedded files
         std::fs::write(ext_dir.join("package.json"), EXT_PACKAGE_JSON)?;
@@ -192,6 +197,9 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::write(src_dir.join("validation.ts"), EXT_VALIDATION_TS)?;
         std::fs::write(src_dir.join("protocol.ts"), EXT_PROTOCOL_TS)?;
         std::fs::write(src_dir.join("binary.ts"), EXT_BINARY_TS)?;
+        std::fs::write(client_dir.join("index.ts"), EXT_CLIENT_INDEX_TS)?;
+        std::fs::write(client_dir.join("errors.ts"), EXT_CLIENT_ERRORS_TS)?;
+        std::fs::write(client_dir.join("coordinator.ts"), EXT_CLIENT_COORDINATOR_TS)?;
 
         sp.set_message("Installing dependencies...");
 

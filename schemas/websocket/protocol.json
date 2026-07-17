@@ -20,6 +20,7 @@
         { "$ref": "#/$defs/NewChat" },
         { "$ref": "#/$defs/GetChats" },
         { "$ref": "#/$defs/SetChat" },
+        { "$ref": "#/$defs/WriteRuntimeState" },
         { "$ref": "#/$defs/Control" },
         { "$ref": "#/$defs/Lifecycle" },
         { "$ref": "#/$defs/CancelSubagent" },
@@ -50,6 +51,8 @@
         { "$ref": "#/$defs/NewChatResult" },
         { "$ref": "#/$defs/ChatListResult" },
         { "$ref": "#/$defs/ChatSwitchResult" },
+        { "$ref": "#/$defs/RuntimeStateWriteResult" },
+        { "$ref": "#/$defs/RequestError" },
         { "$ref": "#/$defs/TokenCount" },
         { "$ref": "#/$defs/SubagentUpdate" },
         { "$ref": "#/$defs/SubagentComplete" },
@@ -81,7 +84,8 @@
       "required": ["type", "text"],
       "properties": {
         "type": { "const": "text" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "client_request_id": { "type": "string", "minLength": 1, "maxLength": 256 }
       },
       "additionalProperties": false
     },
@@ -172,7 +176,8 @@
       "type": "object",
       "required": ["type"],
       "properties": {
-        "type": { "const": "new_chat" }
+        "type": { "const": "new_chat" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 256 }
       },
       "additionalProperties": false
     },
@@ -188,10 +193,22 @@
 
     "SetChat": {
       "type": "object",
-      "required": ["type", "history_path"],
+      "required": ["type", "chat_id"],
       "properties": {
         "type": { "const": "set_chat" },
-        "history_path": { "type": "string" }
+        "chat_id": { "type": "integer" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+
+    "WriteRuntimeState": {
+      "type": "object",
+      "required": ["type", "state"],
+      "properties": {
+        "type": { "const": "write_runtime_state" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "state": { "type": "object", "additionalProperties": true }
       },
       "additionalProperties": false
     },
@@ -236,7 +253,8 @@
         "text": { "type": "string" },
         "content": { "type": "string" },
         "model": { "type": "string" },
-        "stream_id": { "type": "string" }
+        "stream_id": { "type": "string" },
+        "client_request_id": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -246,7 +264,9 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "assistant" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "reasoning": { "type": "string" },
+        "client_request_id": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -255,7 +275,11 @@
       "type": "object",
       "required": ["type"],
       "properties": {
-        "type": { "const": "assistant_complete" }
+        "type": { "const": "assistant_complete" },
+        "client_request_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["completed", "cancelled", "error"] },
+        "code": { "type": "string" },
+        "error": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -265,7 +289,8 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "transcription" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "client_request_id": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -388,7 +413,13 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "new_chat_result" },
-        "history_path": { "type": "string" }
+        "history_path": { "type": "string" },
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "chat_id": { "type": "integer" },
+        "chat_records": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "code": { "type": "string" },
+        "error": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -410,8 +441,40 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "chat_switch_result" },
+        "request_id": { "type": "string" },
         "ok": { "type": "boolean" },
+        "chat_id": { "type": "integer" },
+        "chat_records": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
         "history_path": { "type": "string" },
+        "code": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "RuntimeStateWriteResult": {
+      "type": "object",
+      "required": ["type", "ok"],
+      "properties": {
+        "type": { "const": "runtime_state_write_result" },
+        "request_id": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "applied": { "type": "object", "additionalProperties": true },
+        "snapshot": { "type": "object", "additionalProperties": true },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "code": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "RequestError": {
+      "type": "object",
+      "required": ["type", "ok", "code", "error"],
+      "properties": {
+        "type": { "const": "request_error" },
+        "ok": { "type": "boolean" },
+        "code": { "type": "string" },
         "error": { "type": "string" }
       },
       "additionalProperties": false

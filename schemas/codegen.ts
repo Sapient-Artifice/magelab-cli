@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const schema = JSON.parse(
@@ -132,6 +133,9 @@ ${serverVariants}
 
 function jsonTypeToTs(prop: any): string {
   if (prop.const) return `"${prop.const}"`;
+  if (prop.type === "string" && Array.isArray(prop.enum)) {
+    return prop.enum.map((value: string) => `"${value}"`).join(" | ");
+  }
   if (prop.type === "string") return "string";
   if (prop.type === "integer" || prop.type === "number") return "number";
   if (prop.type === "boolean") return "boolean";
@@ -387,7 +391,10 @@ ${orderedOutput.join("")}${rootModels}`;
 
 // --- Main ---
 
-const rustCode = genRust();
+const rustCode = execFileSync("rustfmt", ["--emit", "stdout"], {
+  input: genRust(),
+  encoding: "utf8",
+});
 const tsCode = genTypeScript();
 const pyCode = genPython();
 
@@ -396,10 +403,26 @@ const rustCorePath = resolve(__dirname, "../../crates/magelab-core/src/protocol/
 const tsPath = resolve(__dirname, "../extension/src/protocol.ts");
 const pyPath = resolve(__dirname, "../../mage-lab/backend/generated/ws_types.py");
 
-writeFileSync(rustCliPath, rustCode);
-writeFileSync(rustCorePath, rustCode);
-writeFileSync(tsPath, tsCode);
-writeFileSync(pyPath, pyCode);
+const outputs = [
+  [rustCliPath, rustCode],
+  [rustCorePath, rustCode],
+  [tsPath, tsCode],
+  [pyPath, pyCode],
+] as const;
+
+if (process.argv.includes("--check")) {
+  const stale = outputs
+    .filter(([path, content]) => readFileSync(path, "utf8") !== content)
+    .map(([path]) => path);
+  if (stale.length) {
+    console.error(`Generated protocol files are stale:\n${stale.join("\n")}`);
+    process.exit(1);
+  }
+  console.log("Generated protocol files are current.");
+  process.exit(0);
+}
+
+for (const [path, content] of outputs) writeFileSync(path, content);
 
 console.log(`Generated:`);
 console.log(`  ${rustCliPath}`);

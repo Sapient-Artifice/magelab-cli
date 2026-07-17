@@ -5,6 +5,7 @@ pub mod client;
 pub mod config;
 pub mod connect;
 pub mod detect;
+pub mod headless_commands;
 pub mod settings;
 pub mod setup_pi;
 pub mod ui;

@@ -110,3 +110,39 @@ fn test_setup_pi_uninstall_removes_directory() {
         "Extension directory should be removed"
     );
 }
+
+#[test]
+#[cfg(unix)]
+fn test_setup_pi_embeds_reusable_client_modules() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    for command in ["pi", "pnpm"] {
+        let path = bin_dir.join(command);
+        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).unwrap();
+    }
+
+    Command::cargo_bin("mage")
+        .unwrap()
+        .arg("setup-pi")
+        .env("HOME", tmp.path())
+        .env("PATH", &bin_dir)
+        .assert()
+        .success();
+
+    let client_dir = tmp
+        .path()
+        .join(".pi/agent/extensions/magelab-agent/src/client");
+    for module in ["index.ts", "errors.ts", "coordinator.ts"] {
+        assert!(
+            client_dir.join(module).is_file(),
+            "embedded client module {module} should be installed"
+        );
+    }
+}

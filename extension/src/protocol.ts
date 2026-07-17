@@ -4,6 +4,7 @@
 export interface TextMessage {
   type: "text";
   text: string;
+  client_request_id?: string;
 }
 
 export interface AudioMessage {
@@ -50,6 +51,7 @@ export interface GetModels {
 
 export interface NewChat {
   type: "new_chat";
+  request_id?: string;
 }
 
 export interface GetChats {
@@ -58,7 +60,14 @@ export interface GetChats {
 
 export interface SetChat {
   type: "set_chat";
-  history_path: string;
+  chat_id: number;
+  request_id?: string;
+}
+
+export interface WriteRuntimeState {
+  type: "write_runtime_state";
+  request_id?: string;
+  state: Record<string, unknown>;
 }
 
 export interface Control {
@@ -121,26 +130,34 @@ export interface ScreenshotResponse {
 
 export interface AssistantStream {
   type: "assistant_stream";
-  phase: string;
+  phase: "start" | "delta" | "end";
   token?: string;
   text?: string;
   content?: string;
   model?: string;
   stream_id?: string;
+  client_request_id?: string;
 }
 
 export interface Assistant {
   type: "assistant";
   text?: string;
+  reasoning?: string;
+  client_request_id?: string;
 }
 
 export interface AssistantComplete {
   type: "assistant_complete";
+  client_request_id?: string;
+  status?: "completed" | "cancelled" | "error";
+  code?: string;
+  error?: string;
 }
 
 export interface Transcription {
   type: "transcription";
   text?: string;
+  client_request_id?: string;
 }
 
 export interface ConfirmationRequest {
@@ -202,6 +219,12 @@ export interface ModelsResult {
 export interface NewChatResult {
   type: "new_chat_result";
   history_path?: string;
+  request_id?: string;
+  ok?: boolean;
+  chat_id?: number;
+  chat_records?: Record<string, unknown>[];
+  code?: string;
+  error?: string;
 }
 
 export interface ChatListResult {
@@ -213,9 +236,31 @@ export interface ChatListResult {
 
 export interface ChatSwitchResult {
   type: "chat_switch_result";
+  request_id?: string;
   ok?: boolean;
+  chat_id?: number;
+  chat_records?: Record<string, unknown>[];
   history_path?: string;
+  code?: string;
   error?: string;
+}
+
+export interface RuntimeStateWriteResult {
+  type: "runtime_state_write_result";
+  request_id?: string;
+  ok: boolean;
+  applied?: Record<string, unknown>;
+  snapshot?: Record<string, unknown>;
+  warnings?: string[];
+  code?: string;
+  error?: string;
+}
+
+export interface RequestError {
+  type: "request_error";
+  ok: boolean;
+  code: string;
+  error: string;
 }
 
 export interface TokenCount {
@@ -303,7 +348,7 @@ export interface SetVoiceResult {
 export interface TtsAudio {
   type: "tts_audio";
   streaming?: boolean;
-  phase?: string;
+  phase?: "start" | "chunk" | "end";
   stream_id?: string;
   mime_type?: string;
 }
@@ -344,7 +389,7 @@ export interface McpInstallPermission {
 export interface ClipboardRequest {
   type: "clipboard_request";
   request_id: string;
-  action: string;
+  action: "read" | "write";
   text?: string;
 }
 
@@ -386,6 +431,7 @@ export type ClientMessage =
   | NewChat
   | GetChats
   | SetChat
+  | WriteRuntimeState
   | Control
   | Lifecycle
   | CancelSubagent
@@ -412,6 +458,8 @@ export type ServerMessage =
   | NewChatResult
   | ChatListResult
   | ChatSwitchResult
+  | RuntimeStateWriteResult
+  | RequestError
   | TokenCount
   | SubagentUpdate
   | SubagentComplete
