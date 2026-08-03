@@ -13,6 +13,8 @@ pub enum OutgoingMessage {
     #[serde(rename = "text")]
     TextMessage {
         text: String,
+        #[serde(default)]
+        client_request_id: Option<String>,
     },
 
     #[serde(rename = "audio")]
@@ -40,36 +42,39 @@ pub enum OutgoingMessage {
     },
 
     #[serde(rename = "set_model")]
-    SetModel {
-        model: String,
-    },
+    SetModel { model: String },
 
     #[serde(rename = "set_voice")]
-    SetVoice {
-        voice: String,
-    },
+    SetVoice { voice: String },
 
     #[serde(rename = "get_models")]
-    GetModels {
-        endpoint: String,
-        api_key: String,
-    },
+    GetModels { endpoint: String, api_key: String },
 
     #[serde(rename = "new_chat")]
-    NewChat {},
+    NewChat {
+        #[serde(default)]
+        request_id: Option<String>,
+    },
 
     #[serde(rename = "get_chats")]
     GetChats {},
 
     #[serde(rename = "set_chat")]
     SetChat {
-        history_path: String,
+        chat_id: i64,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+
+    #[serde(rename = "write_runtime_state")]
+    WriteRuntimeState {
+        #[serde(default)]
+        request_id: Option<String>,
+        state: HashMap<String, Value>,
     },
 
     #[serde(rename = "control")]
-    Control {
-        action: String,
-    },
+    Control { action: String },
 
     #[serde(rename = "lifecycle")]
     Lifecycle {
@@ -78,9 +83,7 @@ pub enum OutgoingMessage {
     },
 
     #[serde(rename = "cancel_subagent")]
-    CancelSubagent {
-        task_id: String,
-    },
+    CancelSubagent { task_id: String },
 
     #[serde(rename = "vault_get_response")]
     VaultGetResponse {
@@ -92,10 +95,7 @@ pub enum OutgoingMessage {
     },
 
     #[serde(rename = "shell_session_input")]
-    ShellSessionInput {
-        session_id: String,
-        chars: String,
-    },
+    ShellSessionInput { session_id: String, chars: String },
 
     #[serde(rename = "mcp_install_permission_response")]
     McpInstallPermissionResponse {
@@ -152,21 +152,38 @@ pub enum IncomingMessage {
         model: Option<String>,
         #[serde(default)]
         stream_id: Option<String>,
+        #[serde(default)]
+        client_request_id: Option<String>,
     },
 
     #[serde(rename = "assistant")]
     Assistant {
         #[serde(default)]
         text: Option<String>,
+        #[serde(default)]
+        reasoning: Option<String>,
+        #[serde(default)]
+        client_request_id: Option<String>,
     },
 
     #[serde(rename = "assistant_complete")]
-    AssistantComplete {},
+    AssistantComplete {
+        #[serde(default)]
+        client_request_id: Option<String>,
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        error: Option<String>,
+    },
 
     #[serde(rename = "transcription")]
     Transcription {
         #[serde(default)]
         text: Option<String>,
+        #[serde(default)]
+        client_request_id: Option<String>,
     },
 
     #[serde(rename = "confirmation_request")]
@@ -215,9 +232,7 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "tools_list")]
-    ToolsList {
-        tools: Vec<Value>,
-    },
+    ToolsList { tools: Vec<Value> },
 
     #[serde(rename = "tool_call_result")]
     ToolCallResult {
@@ -246,6 +261,18 @@ pub enum IncomingMessage {
     NewChatResult {
         #[serde(default)]
         history_path: Option<String>,
+        #[serde(default)]
+        request_id: Option<String>,
+        #[serde(default)]
+        ok: Option<bool>,
+        #[serde(default)]
+        chat_id: Option<i64>,
+        #[serde(default)]
+        chat_records: Option<Vec<HashMap<String, Value>>>,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        error: Option<String>,
     },
 
     #[serde(rename = "chat_list_result")]
@@ -261,11 +288,43 @@ pub enum IncomingMessage {
     #[serde(rename = "chat_switch_result")]
     ChatSwitchResult {
         #[serde(default)]
+        request_id: Option<String>,
+        #[serde(default)]
         ok: Option<bool>,
+        #[serde(default)]
+        chat_id: Option<i64>,
+        #[serde(default)]
+        chat_records: Option<Vec<HashMap<String, Value>>>,
         #[serde(default)]
         history_path: Option<String>,
         #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
         error: Option<String>,
+    },
+
+    #[serde(rename = "runtime_state_write_result")]
+    RuntimeStateWriteResult {
+        #[serde(default)]
+        request_id: Option<String>,
+        ok: bool,
+        #[serde(default)]
+        applied: Option<HashMap<String, Value>>,
+        #[serde(default)]
+        snapshot: Option<HashMap<String, Value>>,
+        #[serde(default)]
+        warnings: Option<Vec<String>>,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        error: Option<String>,
+    },
+
+    #[serde(rename = "request_error")]
+    RequestError {
+        ok: bool,
+        code: String,
+        error: String,
     },
 
     #[serde(rename = "token_count")]
@@ -303,20 +362,13 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "notify")]
-    Notify {
-        title: String,
-        body: String,
-    },
+    Notify { title: String, body: String },
 
     #[serde(rename = "open_url")]
-    OpenUrl {
-        url: String,
-    },
+    OpenUrl { url: String },
 
     #[serde(rename = "open_file")]
-    OpenFile {
-        filepath: String,
-    },
+    OpenFile { filepath: String },
 
     #[serde(rename = "broker_status")]
     BrokerStatus {
@@ -422,9 +474,7 @@ pub enum IncomingMessage {
     },
 
     #[serde(rename = "mcp_install_permission")]
-    McpInstallPermission {
-        server_name: String,
-    },
+    McpInstallPermission { server_name: String },
 
     #[serde(rename = "clipboard_request")]
     ClipboardRequest {

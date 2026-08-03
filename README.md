@@ -67,6 +67,16 @@ mage keys revoke <id>          # Revoke an API key
 # Configuration
 mage config                    # Show current config and file path
 mage config set <key> <val>    # Set a config value
+
+# Headless sessions and assistant turns (Mage v0.12.0+)
+mage sessions list --json
+mage sessions create --name CRM --mcp pipedrive --json
+mage sessions update 42 --model model-name --mcp pipedrive --json
+mage chats create --session 42 --json
+mage chats switch --session 42 --chat 91 --json
+mage ask "Fetch deal 2" --session 42 --chat 91 --jsonl
+mage storage health --json
+mage protocol capabilities --json
 ```
 
 ## Login, Launch, and Connect
@@ -146,6 +156,81 @@ MAGELAB_HOME=/path/to/mage-lab mage launch --wait
 MAGELAB_API_DIR=/Applications/magelab.app/Contents/Resources/bin/api mage launch --dry-run
 mage config set magelab_home /Applications/magelab.app
 ```
+
+## Headless Client Commands
+
+The headless commands implement Mage's acknowledged WebSocket flow. Runtime
+state is confirmed before chat creation or selection, prompts carry a unique
+`client_request_id`, and a turn remains open until the matching
+`assistant_complete` event arrives. A stream `end` event is not treated as the
+end of a tool-using turn.
+
+Create a session with programmatic MCP selection and start its first chat:
+
+```bash
+mage sessions create --name CRM --mcp pipedrive --mcp hubspot --json
+mage chats create --session 42 --json
+```
+
+Run a turn against an existing chat:
+
+```bash
+mage ask "Summarize the current deal" \
+  --session 42 \
+  --chat 91 \
+  --model model-name \
+  --mcp pipedrive \
+  --jsonl
+```
+
+Or create a confirmed chat immediately before the prompt:
+
+```bash
+mage ask "Start a new analysis" --session 42 --new-chat --json
+```
+
+In `--json` mode, stdout contains only the final JSON result. In `--jsonl`
+mode, stdout contains one JSON object per correlated assistant event followed by
+an `assistant_complete` envelope. Human diagnostics and errors use stderr.
+
+`mage ask` uses these exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Assistant completed successfully |
+| `2` | Invalid CLI/setup arguments |
+| `3` | Connection lost or unavailable |
+| `4` | Runtime/chat setup failed |
+| `5` | Operation or turn timed out |
+| `6` | Turn was cancelled |
+| `7` | Assistant returned an error terminal status |
+
+`mage protocol capabilities --json` reports the client contract, not an
+unverified backend claim. Compatibility is feature-probed from required echoed
+request identifiers, terminal status events, and persisted session state. The
+client does not infer safety from a version string; an older backend fails with
+an explicit v0.12.0 compatibility error.
+
+### Concurrency boundary
+
+Mage v0.12.0 still has one mutable active runtime. One CLI invocation runs one
+acknowledged setup-and-turn sequence, but separate processes are not coordinated
+automatically. Services that share one Mage backend must use a process-wide—or,
+across service replicas, distributed—serialization coordinator covering runtime
+setup through `assistant_complete`.
+
+Do not use a subprocess-per-request `mage ask` wrapper as a high-throughput Node
+integration. The reusable TypeScript client under `extension/src/client/` is the
+long-lived Node/Pi integration path; the CLI is intended for operators, shell
+automation, CI, and protocol diagnostics.
+
+These commands operate on Mage sessions, chats, runtime state, and MCP server
+names. They do not implement Drupal entity mapping, tenant authorization, or
+customer-specific prompt policy.
+
+See [Persistent Node.js Headless Client Example](docs/node-headless-client-example.md)
+for the supported long-lived service pattern and application responsibility
+boundary.
 
 ## Pi Extension
 

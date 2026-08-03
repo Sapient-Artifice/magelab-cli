@@ -189,18 +189,86 @@ describe("BackendSocket", () => {
     expect(socket.state).toBe("disconnected");
   });
 
-  it("handles concurrent requestByType calls of same type", async () => {
-    // Two concurrent get_tools requests should both resolve independently
+  it("rejects concurrent uncorrelated requests of the same type", async () => {
     const socket = await BackendSocket.connect(backend.url);
 
-    const [r1, r2] = await Promise.all([
-      socket.requestByType({ type: "get_tools" }, "tools_list"),
-      socket.requestByType({ type: "get_tools" }, "tools_list"),
-    ]);
+    const first = socket.requestByType(
+      { type: "get_tools" },
+      "tools_list"
+    );
+    const second = socket.requestByType(
+      { type: "get_tools" },
+      "tools_list"
+    );
 
-    expect(r1.type).toBe("tools_list");
-    expect(r2.type).toBe("tools_list");
+    await expect(second).rejects.toThrow("Only one uncorrelated");
+    await expect(first).resolves.toMatchObject({ type: "tools_list" });
 
     socket.close();
+  });
+
+  it("rejects an uncorrelated response instead of waiting for timeout", async () => {
+    const legacyBackend = new MockBackend({
+      onMessage(ws, data) {
+        if (data.type !== "new_chat") return false;
+        ws.send(JSON.stringify({ type: "new_chat_result", ok: true, chat_id: 1 }));
+        return true;
+      },
+    });
+    await legacyBackend.start();
+    const socket = await BackendSocket.connect(legacyBackend.url);
+
+    await expect(
+      socket.requestById({ type: "new_chat" }, "new_chat_result", 30_000)
+    ).rejects.toThrow("v0.12.0 or newer");
+    expect(socket.pendingCount()).toBe(0);
+
+    socket.close();
+    await legacyBackend.close();
+  });
+
+  it("validates caller-supplied request identifiers", async () => {
+    const socket = await BackendSocket.connect(backend.url);
+    await expect(
+      socket.requestById(
+        { type: "new_chat", request_id: "x".repeat(257) },
+        "new_chat_result"
+      )
+    ).rejects.toThrow("at most 256");
+    expect(socket.pendingCount()).toBe(0);
+    socket.close();
+  });
+
+  it("does not let an unknown request_id resolve a pending operation", async () => {
+    const correlationBackend = new MockBackend({
+      onMessage(ws, data) {
+        if (data.type !== "new_chat") return false;
+        ws.send(JSON.stringify({
+          type: "new_chat_result",
+          request_id: "unknown",
+          ok: true,
+          chat_id: 1,
+        }));
+        ws.send(JSON.stringify({
+          type: "new_chat_result",
+          request_id: data.request_id,
+          ok: true,
+          chat_id: 2,
+        }));
+        return true;
+      },
+    });
+    await correlationBackend.start();
+    const socket = await BackendSocket.connect(correlationBackend.url);
+
+    await expect(
+      socket.requestById(
+        { type: "new_chat", request_id: "expected" },
+        "new_chat_result"
+      )
+    ).resolves.toMatchObject({ request_id: "expected", chat_id: 2 });
+
+    socket.close();
+    await correlationBackend.close();
   });
 });

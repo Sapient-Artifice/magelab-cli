@@ -16,6 +16,10 @@ export interface MockBackendOptions {
   onToolCall?: (name: string, args: any) => string | Promise<string>;
   /** Delay before sending tool_call_result (ms) */
   toolDelay?: number;
+  /** Intercept a message. Return true when the default handler should not run. */
+  onMessage?: (ws: WebSocket, data: any) => boolean | Promise<boolean>;
+  /** Custom assistant-turn script. */
+  onText?: (ws: WebSocket, data: any) => void | Promise<void>;
 }
 
 const DEFAULT_TOOLS = [
@@ -143,6 +147,9 @@ export class MockBackend {
   private options: MockBackendOptions;
   private _port = 0;
   private pendingConfirmations = new Map<string, { callId: string; ws: WebSocket }>();
+  private _receivedMessages: any[] = [];
+  private nextChatId = 100;
+  private activeTurnId: string | undefined;
 
   constructor(options: MockBackendOptions = {}) {
     this.options = options;
@@ -164,6 +171,10 @@ export class MockBackend {
     return `ws://127.0.0.1:${this._port}`;
   }
 
+  get receivedMessages(): readonly any[] {
+    return this._receivedMessages;
+  }
+
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server.on("listening", () => {
@@ -180,6 +191,9 @@ export class MockBackend {
   }
 
   private async handleMessage(ws: WebSocket, data: any) {
+    this._receivedMessages.push(data);
+    if (await this.options.onMessage?.(ws, data)) return;
+
     switch (data.type) {
       case "get_tools":
         ws.send(JSON.stringify({
@@ -207,6 +221,76 @@ export class MockBackend {
           history_path: "/tmp/test",
           list_files: [],
         }));
+        break;
+
+      case "write_runtime_state":
+        ws.send(JSON.stringify({
+          type: "runtime_state_write_result",
+          request_id: data.request_id,
+          ok: true,
+          applied: data.state,
+          snapshot: data.state,
+        }));
+        break;
+
+      case "new_chat":
+        ws.send(JSON.stringify({
+          type: "new_chat_result",
+          request_id: data.request_id,
+          ok: true,
+          chat_id: this.nextChatId++,
+          chat_records: [],
+        }));
+        break;
+
+      case "set_chat":
+        ws.send(JSON.stringify({
+          type: "chat_switch_result",
+          request_id: data.request_id,
+          ok: true,
+          chat_id: data.chat_id,
+          chat_records: [],
+        }));
+        break;
+
+      case "text":
+        this.activeTurnId = data.client_request_id;
+        if (this.options.onText) {
+          await this.options.onText(ws, data);
+        } else {
+          ws.send(JSON.stringify({
+            type: "assistant_stream",
+            phase: "start",
+            client_request_id: data.client_request_id,
+          }));
+          ws.send(JSON.stringify({
+            type: "assistant_stream",
+            phase: "delta",
+            token: `answer:${data.text}`,
+            client_request_id: data.client_request_id,
+          }));
+          ws.send(JSON.stringify({
+            type: "assistant_stream",
+            phase: "end",
+            client_request_id: data.client_request_id,
+          }));
+          ws.send(JSON.stringify({
+            type: "assistant_complete",
+            client_request_id: data.client_request_id,
+            status: "completed",
+          }));
+        }
+        break;
+
+      case "control":
+        if (data.action === "stop" && this.activeTurnId) {
+          ws.send(JSON.stringify({
+            type: "assistant_complete",
+            client_request_id: this.activeTurnId,
+            status: "cancelled",
+          }));
+          this.activeTurnId = undefined;
+        }
         break;
     }
   }

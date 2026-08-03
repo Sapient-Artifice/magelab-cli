@@ -13,6 +13,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BackendSocket, ServerMessage } from "./websocket.js";
+import type { MageClient } from "./client/index.js";
 
 interface SkillCommand {
   name: string;
@@ -89,7 +90,8 @@ function scanCommandsDir(dir: string, out: SkillCommand[]): void {
  */
 export function registerCommands(
   pi: any,
-  socket: BackendSocket
+  socket: BackendSocket,
+  client: MageClient
 ): number {
   // 1. /magelab <prompt> — delegate to backend agent
   pi.registerCommand("magelab", {
@@ -99,10 +101,23 @@ export function registerCommands(
         if (ctx.hasUI) ctx.ui.notify("Usage: /magelab <prompt>", "warning");
         return;
       }
-      // Send as a text message to the backend's agentic loop
-      socket.send({ type: "text", text: args });
       if (ctx.hasUI) {
         ctx.ui.setStatus("magelab-agent", "MageLab agent thinking...");
+      }
+      try {
+        const result = await client.runTurn({ text: args }).completed;
+        pi.sendMessage({
+          customType: "magelab-response",
+          content: result.text,
+          display: true,
+        });
+        if (result.status === "error" && ctx.hasUI) {
+          ctx.ui.notify(result.error || "MageLab turn failed", "error");
+        }
+      } catch (error) {
+        if (ctx.hasUI) ctx.ui.notify((error as Error).message, "error");
+      } finally {
+        if (ctx.hasUI) ctx.ui.setStatus("magelab-agent", undefined);
       }
     },
   });
@@ -111,7 +126,6 @@ export function registerCommands(
   pi.registerCommand("chats", {
     description: "List MageLab chat histories",
     handler: async (_args: string, ctx: any) => {
-      socket.send({ type: "get_chats" });
       try {
         const result = await socket.requestByType(
           { type: "get_chats" },
@@ -141,22 +155,21 @@ export function registerCommands(
 
   // 3. /chat <name> — switch backend chat history
   pi.registerCommand("chat", {
-    description: "Switch MageLab chat history (use /chats to list)",
+    description: "Switch MageLab chat by numeric id (use /chats to list)",
     handler: async (args: string, ctx: any) => {
-      const path = args.trim();
-      if (!path) {
-        if (ctx.hasUI) ctx.ui.notify("Usage: /chat <history_path>", "warning");
+      const chatId = Number.parseInt(args.trim(), 10);
+      if (!Number.isInteger(chatId) || chatId <= 0) {
+        if (ctx.hasUI) ctx.ui.notify("Usage: /chat <chat_id>", "warning");
         return;
       }
-      socket.send({ type: "set_chat", history_path: path });
       try {
-        const result = await socket.requestByType(
-          { type: "set_chat", history_path: path },
+        const result = await socket.requestById(
+          { type: "set_chat", chat_id: chatId },
           "chat_switch_result"
         );
         const r = result as any;
         if (r.ok) {
-          if (ctx.hasUI) ctx.ui.notify(`Switched to chat: ${r.history_path || path}`, "info");
+          if (ctx.hasUI) ctx.ui.notify(`Switched to chat: ${r.chat_id || chatId}`, "info");
         } else {
           if (ctx.hasUI) ctx.ui.notify(`Failed: ${r.error || "unknown error"}`, "error");
         }
@@ -170,14 +183,13 @@ export function registerCommands(
   pi.registerCommand("newchat", {
     description: "Start a new MageLab chat history",
     handler: async (_args: string, ctx: any) => {
-      socket.send({ type: "new_chat" });
       try {
-        const result = await socket.requestByType(
+        const result = await socket.requestById(
           { type: "new_chat" },
           "new_chat_result"
         );
-        const path = (result as any).history_path;
-        if (ctx.hasUI) ctx.ui.notify(`New chat: ${path || "created"}`, "info");
+        const chatId = (result as any).chat_id;
+        if (ctx.hasUI) ctx.ui.notify(`New chat: ${chatId || "created"}`, "info");
       } catch {
         if (ctx.hasUI) ctx.ui.notify("Failed to create new chat", "error");
       }
@@ -192,7 +204,6 @@ export function registerCommands(
       const model = args.trim();
       if (!model) {
         // Show current model from runtime config
-        socket.send({ type: "get_runtime_config" });
         try {
           const config = await socket.requestByType(
             { type: "get_runtime_config" },
@@ -207,7 +218,6 @@ export function registerCommands(
         }
         return;
       }
-      socket.send({ type: "set_model", model });
       try {
         const result = await socket.requestByType(
           { type: "set_model", model },
@@ -233,7 +243,12 @@ export function registerCommands(
       handler: async (args: string, _ctx: any) => {
         // Combine command body with user args and send to backend
         const prompt = args ? `${cmd.body}\n\n${args}` : cmd.body;
-        socket.send({ type: "text", text: prompt });
+        const result = await client.runTurn({ text: prompt }).completed;
+        pi.sendMessage({
+          customType: "magelab-response",
+          content: result.text,
+          display: true,
+        });
       },
     });
   }
