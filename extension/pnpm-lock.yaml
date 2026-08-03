@@ -15,8 +15,8 @@ importers:
         specifier: ^11.0.0
         version: 11.0.0
       partysocket:
-        specifier: ^1.1.18
-        version: 1.1.18
+        specifier: ^1.1.19
+        version: 1.1.19
       ws:
         specifier: ^8.18.0
         version: 8.20.0
@@ -644,8 +644,8 @@ packages:
     resolution: {integrity: sha512-smsWv2LzFjP03xmvFoJ331ss6h+jixfA4UUV/Bsiyuu4YJPfN+FIQGOIiv4w9/+MoHkfkJ22UIaQWRVFRfH6Vw==}
     engines: {node: '>=20'}
 
-  partysocket@1.1.18:
-    resolution: {integrity: sha512-SyuvH9VavWOSa14v6dYdp3yfSUDII4BQB1+TkGOFBkjfZKjnDBiba4fhdhwBlqGBkqw4ea3gTA1DYhSffX24Wg==}
+  partysocket@1.1.19:
+    resolution: {integrity: sha512-hPwsXSdUc8PKNCinET6TD3JQOxzQ2JaP0bUZQXBVl6UM8UuLn1odgf1LcJXHy4UHSQwWL/RU3AnyhEsGM+W+sg==}
     peerDependencies:
       react: '>=17'
     peerDependenciesMeta:
@@ -1265,7 +1265,7 @@ snapshots:
       powershell-utils: 0.1.0
       wsl-utils: 0.3.1
 
-  partysocket@1.1.18:
+  partysocket@1.1.19:
     dependencies:
       event-target-polyfill: 0.0.4
 
