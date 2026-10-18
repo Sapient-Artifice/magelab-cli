@@ -143,7 +143,7 @@ jobs:
         run: |
           lipo -create -output mage-macos-universal mage-macos-x86_64 mage-macos-aarch64
           chmod +x mage-macos-universal
-          lipo -verify_arch x86_64 arm64 mage-macos-universal
+          lipo mage-macos-universal -verify_arch x86_64 arm64
           python scripts/verify_release.py --binary mage-macos-universal
       - uses: actions/upload-artifact@v4
         with:
