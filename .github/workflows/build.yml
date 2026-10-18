@@ -1,0 +1,171 @@
+name: Build and verify CLI
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      MAGELAB_READ_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  MAGELAB_SKIP_KEYCHAIN_TESTS: "1"
+  # Reviewed workspace dependencies/core; never build a release against floating main.
+  MAGELAB_WORKSPACE_REV: 10518d6a21a9a2f56f20813913fde5cbfdb5d61e
+
+jobs:
+  build:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            name: mage-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-15
+            name: mage-macos-aarch64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            name: mage-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+            name: mage-linux-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: mage-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out pinned workspace
+        uses: actions/checkout@v4
+        with:
+          repository: Sapient-Artifice/magelab
+          ref: ${{ env.MAGELAB_WORKSPACE_REV }}
+          token: ${{ secrets.MAGELAB_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Overlay this CLI revision
+        uses: actions/checkout@v4
+        with:
+          path: magelab-cli
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release scripts and tag identity
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          python -m unittest discover -s magelab-cli/scripts -p 'test_*.py' -v
+          if [ -n "$RELEASE_TAG" ]; then
+            python magelab-cli/scripts/verify_release.py --expected-tag "$RELEASE_TAG"
+          else
+            python magelab-cli/scripts/verify_release.py
+          fi
+
+      - name: Prepare reviewed workspace dependencies
+        run: python magelab-cli/scripts/prepare_workspace.py
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Check CLI formatting and lint
+        run: |
+          cargo fmt --check -p magelab-cli
+          cargo clippy --locked -p magelab-cli --target ${{ matrix.target }} -- -D warnings
+
+      - name: Test core and CLI on the native target
+        run: cargo test --locked --workspace --target ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }} -p magelab-cli
+
+      - name: Stage and validate actual release asset
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.name }}
+        run: |
+          binary="target/$TARGET/release/mage"
+          if [ "$RUNNER_OS" = Windows ]; then binary="$binary.exe"; fi
+          cp "$binary" "$ASSET"
+          if [ -n "$RELEASE_TAG" ]; then
+            python magelab-cli/scripts/verify_release.py --binary "$ASSET" --expected-tag "$RELEASE_TAG"
+          else
+            python magelab-cli/scripts/verify_release.py --binary "$ASSET"
+          fi
+          cmp Cargo.lock magelab-cli/Cargo.lock
+
+      - name: Upload verified artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          if-no-files-found: error
+
+  macos-universal:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: mage-macos-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: mage-macos-aarch64
+      - name: Create and validate universal binary on Apple Silicon
+        run: |
+          lipo -create -output mage-macos-universal mage-macos-x86_64 mage-macos-aarch64
+          chmod +x mage-macos-universal
+          lipo -verify_arch x86_64 arm64 mage-macos-universal
+          python scripts/verify_release.py --binary mage-macos-universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mage-macos-universal
+          path: mage-macos-universal
+          if-no-files-found: error
+
+  verify-universal-intel:
+    needs: macos-universal
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: mage-macos-universal
+      - name: Validate universal binary on Intel
+        run: |
+          chmod +x mage-macos-universal
+          python scripts/verify_release.py --binary mage-macos-universal

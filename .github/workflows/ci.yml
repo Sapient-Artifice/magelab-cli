@@ -1,23 +1,15 @@
-name: CI — Monorepo Notice
-
-# This crate is a workspace member of Sapient-Artifice/magelab.
-# CI (build, test, clippy, fmt) runs from the monorepo workflow:
-#   .github/workflows/rust.yml
-#
-# This stub exists so PRs against the standalone repo show a status check
-# rather than silently having no CI.
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  notice:
-    name: Workspace build notice
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "magelab-cli is a workspace member of Sapient-Artifice/magelab."
-          echo "Full CI (build, test, clippy, fmt) runs from the monorepo."
-          echo "See: https://github.com/Sapient-Artifice/magelab/actions/workflows/rust.yml"
+  test:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
