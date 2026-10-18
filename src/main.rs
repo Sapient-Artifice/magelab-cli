@@ -6,6 +6,7 @@ mod config;
 mod connect;
 mod detect;
 mod headless_commands;
+mod managed_commands;
 mod settings;
 mod setup_pi;
 mod ui;
@@ -28,6 +29,10 @@ use config::Config;
     about = "MageLab CLI — infrastructure management for MageLab"
 )]
 struct Cli {
+    /// Read and save CLI settings in this existing TOML file (not auth or vault storage)
+    #[arg(long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
     /// Skip Touch ID verification
     #[arg(long, global = true)]
     no_touchid: bool,
@@ -143,6 +148,16 @@ enum Commands {
     Settings {
         #[command(subcommand)]
         action: Option<SettingsAction>,
+    },
+    /// Manage previewed skill-source installations on a direct backend
+    Skills {
+        #[command(subcommand)]
+        action: managed_commands::SkillsCommand,
+    },
+    /// Manage MCP dependency installation policy on a direct backend
+    Mcp {
+        #[command(subcommand)]
+        action: managed_commands::McpCommand,
     },
     /// Manage durable Mage sessions
     Sessions {
@@ -378,7 +393,14 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let mut config = Config::load().unwrap_or_default();
+    let mut config = match cli.config {
+        Some(path) => {
+            let mut config = Config::load_from(&path)?;
+            config.config_path = Some(path);
+            config
+        }
+        None => Config::load().unwrap_or_default(),
+    };
 
     if config.telemetry() {
         analytics::init().await;
@@ -490,6 +512,8 @@ async fn run() -> Result<()> {
         }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
+        Commands::Skills { action } => managed_commands::skills(&config, action).await,
+        Commands::Mcp { action } => managed_commands::mcp(&config, action).await,
         Commands::Sessions { action } => {
             let command = match action {
                 SessionsAction::List { json } => headless_commands::SessionsCommand::List { json },
@@ -1237,7 +1261,10 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
 fn cmd_config(config: &mut Config, action: Option<ConfigAction>) -> Result<()> {
     match action {
         None => {
-            let path = Config::path()?;
+            let path = match &config.config_path {
+                Some(path) => path.clone(),
+                None => Config::path()?,
+            };
             println!("Config file: {}", path.display());
             println!();
             if path.exists() {
