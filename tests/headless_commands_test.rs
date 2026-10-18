@@ -130,7 +130,8 @@ async fn ask_jsonl_keeps_stdout_machine_readable_and_sends_prompt_once() {
 
     let output = tokio::process::Command::new(assert_cmd::cargo::cargo_bin("mage"))
         .args(["ask", "hello", "--session", "42", "--new-chat", "--jsonl"])
-        .env("XDG_CONFIG_HOME", config_root.path())
+        .arg("--config")
+        .arg(config_dir.join("cli.toml"))
         .output()
         .await
         .unwrap();

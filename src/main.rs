@@ -29,6 +29,10 @@ use config::Config;
     about = "MageLab CLI — infrastructure management for MageLab"
 )]
 struct Cli {
+    /// Read and save CLI settings in this existing TOML file (not auth or vault storage)
+    #[arg(long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
     /// Skip Touch ID verification
     #[arg(long, global = true)]
     no_touchid: bool,
@@ -389,7 +393,14 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    let mut config = Config::load().unwrap_or_default();
+    let mut config = match cli.config {
+        Some(path) => {
+            let mut config = Config::load_from(&path)?;
+            config.config_path = Some(path);
+            config
+        }
+        None => Config::load().unwrap_or_default(),
+    };
 
     if config.telemetry() {
         analytics::init().await;
@@ -1250,7 +1261,10 @@ async fn cmd_keys(config: &Config, action: KeysAction) -> Result<()> {
 fn cmd_config(config: &mut Config, action: Option<ConfigAction>) -> Result<()> {
     match action {
         None => {
-            let path = Config::path()?;
+            let path = match &config.config_path {
+                Some(path) => path.clone(),
+                None => Config::path()?,
+            };
             println!("Config file: {}", path.display());
             println!();
             if path.exists() {

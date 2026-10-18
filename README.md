@@ -72,6 +72,7 @@ mage keys revoke <id>          # Revoke an API key
 # Configuration
 mage config                    # Show current config and file path
 mage config set <key> <val>    # Set a config value
+mage --config ./cli.toml config # Read a specific existing CLI config file
 
 # Headless sessions and assistant turns (Mage v0.12.0+)
 mage sessions list --json
@@ -321,6 +322,12 @@ On Pi startup, the extension calls `mage connect --json --no-launch` to find an 
 ## Configuration
 
 Config file: `~/.config/magelab/cli.toml`
+
+Use the global `--config PATH` option to read and save CLI settings in another
+existing TOML file, for example `mage --config ./cli.toml config set local_url
+http://127.0.0.1:11115`. A missing or malformed explicitly selected file is an
+error. This option only selects CLI settings; authentication credentials, vault
+storage and backend configuration keep their own locations.
 
 ```toml
 gateway_url = "https://api.magelab.ai"

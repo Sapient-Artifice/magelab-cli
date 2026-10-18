@@ -5,42 +5,20 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn run(args: Vec<String>, local_url: String, token: Option<&str>) -> Output {
     let token = token.map(str::to_owned);
-    // Windows resolves the config directory through its known-folder API, which
-    // ignores APPDATA overrides. Keep subprocess requests on the mock backend.
-    #[cfg(windows)]
-    let args = {
-        let mut args = args;
-        if args
-            .first()
-            .is_some_and(|command| command == "skills" || command == "mcp")
-            && !args.iter().any(|argument| argument == "--url")
-        {
-            args.extend(["--url".to_string(), local_url.clone()]);
-        }
-        args
-    };
     tokio::task::spawn_blocking(move || {
         let temporary = tempfile::tempdir().unwrap();
-        for base in [
-            temporary.path().to_path_buf(),
-            temporary.path().join("Library/Application Support"),
-        ] {
-            let dir = base.join("magelab");
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
-                dir.join("cli.toml"),
-                format!("local_url = {local_url:?}\ntelemetry = false\n"),
-            )
-            .unwrap();
-        }
+        let config_path = temporary.path().join("cli.toml");
+        std::fs::write(
+            &config_path,
+            format!("local_url = {local_url:?}\ntelemetry = false\n"),
+        )
+        .unwrap();
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_mage"));
         command
+            .arg("--config")
+            .arg(&config_path)
             .args(args)
             .stdin(std::process::Stdio::null())
-            .env("XDG_CONFIG_HOME", temporary.path())
-            .env("APPDATA", temporary.path())
-            .env("HOME", temporary.path())
-            .env("USERPROFILE", temporary.path())
             .env_remove("MAGELAB_REMOTE_ACCESS_TOKEN")
             .env_remove("MAGELAB_API_KEY");
         if let Some(token) = token {
