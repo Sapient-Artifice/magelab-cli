@@ -16,9 +16,9 @@ standalone checkout cannot resolve the inherited workspace dependencies. For
 pinned release builds and validation, see [Releasing](docs/releasing.md).
 
 ```bash
-cargo build                    # Debug build
-cargo build --release          # Release build
-cargo install --path .         # Install `mage` binary to ~/.cargo/bin
+cargo build -p magelab-cli           # Debug build
+cargo build --release -p magelab-cli # Release build
+cargo install --path magelab-cli    # Install `mage` binary to ~/.cargo/bin
 ```
 
 ## Running
