@@ -6,6 +6,7 @@ mod config;
 mod connect;
 mod detect;
 mod headless_commands;
+mod managed_commands;
 mod settings;
 mod setup_pi;
 mod ui;
@@ -143,6 +144,16 @@ enum Commands {
     Settings {
         #[command(subcommand)]
         action: Option<SettingsAction>,
+    },
+    /// Manage previewed skill-source installations on a direct backend
+    Skills {
+        #[command(subcommand)]
+        action: managed_commands::SkillsCommand,
+    },
+    /// Manage MCP dependency installation policy on a direct backend
+    Mcp {
+        #[command(subcommand)]
+        action: managed_commands::McpCommand,
     },
     /// Manage durable Mage sessions
     Sessions {
@@ -490,6 +501,8 @@ async fn run() -> Result<()> {
         }
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Settings { action } => cmd_settings(&config, action).await,
+        Commands::Skills { action } => managed_commands::skills(&config, action).await,
+        Commands::Mcp { action } => managed_commands::mcp(&config, action).await,
         Commands::Sessions { action } => {
             let command = match action {
                 SessionsAction::List { json } => headless_commands::SessionsCommand::List { json },

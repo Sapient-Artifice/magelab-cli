@@ -10,6 +10,11 @@ The installed binary is `mage`.
 
 ## Building
 
+This crate belongs to the `Sapient-Artifice/magelab` Cargo workspace and requires
+its sibling `crates/magelab-core`. Run these commands from that workspace; a
+standalone checkout cannot resolve the inherited workspace dependencies. For
+pinned release builds and validation, see [Releasing](docs/releasing.md).
+
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
@@ -78,6 +83,36 @@ mage ask "Fetch deal 2" --session 42 --chat 91 --jsonl
 mage storage health --json
 mage protocol capabilities --json
 ```
+
+## Managed skills and MCP installation policy (Mage v0.13.0+)
+
+```bash
+mage skills add owner/repository --preview --json
+mage skills add owner/repository --skill skill-name --yes
+mage skills add owner/repository --project --session 42 --yes
+mage skills list --json
+mage skills update SOURCE_ID --preview --json
+mage skills update SOURCE_ID --yes
+mage skills remove SOURCE_ID --yes
+mage mcp approve server-name --session 42 --json
+mage mcp revoke server-name --session 42 --json
+mage mcp policy server-name deny --json
+```
+
+These commands use the running backend at `local_url`, or the explicit `--url`
+override, without launching a backend or falling back to a gateway or relay.
+Local source paths refer to the backend machine; relative paths resolve from the
+backend working directory. Use absolute paths when the CLI and backend start in
+different directories. Set `MAGELAB_REMOTE_ACCESS_TOKEN` if that backend requires
+bearer authentication.
+`--session` binds requests to the session owner; project skills require it.
+Skill previews can be inspected without applying them; use `--yes` to explicitly
+approve changes in noninteractive scripts. Updates preserve the backend's
+selected skill set unless `--skill` selects another set.
+
+MCP `approve` sets installation policy to `allow`; `revoke` restores `prompt`.
+`policy ... deny` blocks installation. Installation permission does not change
+MCP trust, model locality, account authorization, or tool permissions.
 
 ## Login, Launch, and Connect
 
