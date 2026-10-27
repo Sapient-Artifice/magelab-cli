@@ -10,7 +10,6 @@ mod headless_commands;
 mod managed_commands;
 mod settings;
 mod setup_pi;
-mod skills;
 mod ui;
 mod vault;
 use anyhow::Result;

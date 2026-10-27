@@ -133,6 +133,8 @@ mage connect
 
 `mage launch` records a unique launch identity before starting the backend. The backend publishes its actual PID, version, and process start time, and removes its own record on clean shutdown. `mage launch --wait` verifies that the responding backend belongs to that launch. Keep the CLI and backend updated together for this identity handshake.
 
+CLI v0.1.15 requires a backend that reports process identity for `mage launch --wait` and `mage stop`. Upgrade Mage Lab together with the CLI: an older backend cannot complete the launch handshake, and the CLI terminates its launch after the readiness timeout. Existing legacy PID records do not authorize stopping a process, even with `--force`.
+
 `mage stop` removes records for exited processes. Before stopping a live process, it verifies the recorded instance against `/health`; `--force` still requires that identity check. A legacy record or an unresponsive process requires manual inspection, so a stale or reused PID cannot cause an unrelated process to be terminated.
 
 `mage launch --wait` starts the backend, waits for health, and then pushes available vault secrets to the running backend. If you launch first and sign in afterward, push secrets explicitly:
