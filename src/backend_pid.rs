@@ -2,6 +2,58 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::{Duration, Instant};
+
+fn require_regular_file(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => anyhow::ensure!(
+            metadata.file_type().is_file(),
+            "Backend process record and lock must be regular files, not symlinks: {}",
+            path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+fn record_lock(path: &Path, timeout: Duration) -> Result<std::fs::File> {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".lock");
+    let lock_path = std::path::PathBuf::from(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    require_regular_file(&lock_path)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    require_regular_file(&lock_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let opened = file.metadata()?;
+        let current = std::fs::symlink_metadata(&lock_path)?;
+        anyhow::ensure!(
+            opened.dev() == current.dev() && opened.ino() == current.ino(),
+            "Backend process record lock was replaced while opening it."
+        );
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            },
+            Err(std::fs::TryLockError::WouldBlock) => anyhow::bail!("Backend process record is busy; retry after the current launch or shutdown finishes."),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackendPidFile {
@@ -56,6 +108,12 @@ impl BackendPidFile {
 }
 
 pub fn read(path: &Path) -> Result<Option<BackendPidFile>> {
+    let _lock = record_lock(path, Duration::from_secs(5))?;
+    read_unlocked(path)
+}
+
+fn read_unlocked(path: &Path) -> Result<Option<BackendPidFile>> {
+    require_regular_file(path)?;
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(Some(
             serde_json::from_str(&contents)
@@ -68,9 +126,7 @@ pub fn read(path: &Path) -> Result<Option<BackendPidFile>> {
 
 pub fn write_pending(path: &Path, record: &BackendPidFile) -> Result<()> {
     use std::io::Write;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let _lock = record_lock(path, Duration::from_secs(5))?;
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)
         .context("Another backend launch owns the PID record. Inspect it with `mage stop` before retrying.")?;
     file.write_all(serde_json::to_string_pretty(record)?.as_bytes())?;
@@ -79,7 +135,8 @@ pub fn write_pending(path: &Path, record: &BackendPidFile) -> Result<()> {
 }
 
 pub fn remove_owned(path: &Path, expected: &BackendPidFile) -> Result<()> {
-    let Some(current) = read(path)? else {
+    let _lock = record_lock(path, Duration::from_secs(5))?;
+    let Some(current) = read_unlocked(path)? else {
         return Ok(());
     };
     let same = match expected.instance_id.as_deref() {
@@ -122,6 +179,37 @@ mod tests {
             instance_id: Some("owned-instance".into()),
             version: None,
         }
+    }
+
+    #[test]
+    fn record_mutex_excludes_other_handles_and_survives_record_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backend.pid.json");
+        let held = record_lock(&path, Duration::ZERO).unwrap();
+        assert!(record_lock(&path, Duration::from_millis(20)).is_err());
+        drop(held);
+        write_pending(&path, &pending()).unwrap();
+        remove_owned(&path, &pending()).unwrap();
+        assert!(dir.path().join("backend.pid.json.lock").is_file());
+        assert!(record_lock(&path, Duration::ZERO).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn record_and_mutex_symlinks_are_rejected() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backend.pid.json");
+        let target = dir.path().join("other");
+        std::fs::write(&target, "untouched").unwrap();
+        let lock_path = dir.path().join("backend.pid.json.lock");
+        symlink(&target, &lock_path).unwrap();
+        assert!(write_pending(&path, &pending()).is_err());
+        std::fs::remove_file(&lock_path).unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(read(&path).is_err());
+        assert!(remove_owned(&path, &pending()).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
     }
 
     fn live() -> BackendIdentity {
