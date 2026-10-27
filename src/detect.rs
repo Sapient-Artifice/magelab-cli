@@ -94,6 +94,44 @@ pub async fn check_backend_health(local_url: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Return the identity of the actual Python backend, not just an HTTP 200.
+pub async fn backend_identity(local_url: &str) -> Option<crate::backend_pid::BackendIdentity> {
+    health_client()
+        .get(format!("{}/health", local_url.trim_end_matches('/')))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()
+}
+
+pub async fn wait_for_backend_instance(
+    local_url: &str,
+    instance_id: &str,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if let Some(identity) = backend_identity(local_url).await {
+            anyhow::ensure!(identity.instance_id == instance_id,
+                "A different backend is responding at {local_url}; the launched backend is not ready.");
+            anyhow::ensure!(
+                identity.status == "ok" && identity.pid > 1 && !identity.version.is_empty(),
+                "The launched backend returned an invalid identity."
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    anyhow::bail!(
+        "Backend did not report its launch identity within {:?}",
+        timeout
+    )
+}
+
 /// Find a launchable backend bundle for either a dev repo or packaged app.
 pub fn find_backend_bundle(config_override: Option<&str>) -> Result<Option<BackendBundle>> {
     if let Ok(api_dir) = std::env::var("MAGELAB_API_DIR") {
@@ -302,6 +340,26 @@ pub fn launch_backend_headless(
     relay_enabled: bool,
     control_secret: &str,
 ) -> Result<Child> {
+    launch_backend_headless_owned(
+        bundle,
+        host,
+        port,
+        relay_enabled,
+        control_secret,
+        &generate_backend_control_secret(),
+        None,
+    )
+}
+
+pub fn launch_backend_headless_owned(
+    bundle: &BackendBundle,
+    host: &str,
+    port: u16,
+    relay_enabled: bool,
+    control_secret: &str,
+    instance_id: &str,
+    pid_path: Option<&Path>,
+) -> Result<Child> {
     // Log backend output to ~/.config/magelab/backend.log
     let log_dir = dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
@@ -314,7 +372,15 @@ pub fn launch_backend_headless(
             Err(_) => (Stdio::null(), Stdio::null()),
         };
 
-    let mut cmd = build_backend_command(bundle, host, port, relay_enabled, control_secret);
+    let mut cmd = build_backend_command(
+        bundle,
+        host,
+        port,
+        relay_enabled,
+        control_secret,
+        instance_id,
+        pid_path,
+    );
     cmd.stdin(Stdio::null())
         .stdout(stdout_cfg)
         .stderr(stderr_cfg);
@@ -336,6 +402,8 @@ fn build_backend_command(
     port: u16,
     relay_enabled: bool,
     control_secret: &str,
+    instance_id: &str,
+    pid_path: Option<&Path>,
 ) -> Command {
     let backend_arg = bundle.backend_dir.to_string_lossy().to_string();
     let port_arg = port.to_string();
@@ -357,6 +425,12 @@ fn build_backend_command(
 
     cmd.env("MAGELAB_BACKEND_AUTH_SOURCE", "cli");
     cmd.env("MAGELAB_BACKEND_CONTROL_SECRET", control_secret);
+    cmd.env("MAGELAB_BACKEND_INSTANCE_ID", instance_id);
+    if let Some(path) = pid_path {
+        cmd.env("MAGELAB_BACKEND_PID_PATH", path);
+    } else {
+        cmd.env_remove("MAGELAB_BACKEND_PID_PATH");
+    }
     if let Ok(current_exe) = std::env::current_exe() {
         cmd.env("MAGE_CLI_PATH", current_exe);
     }
@@ -448,7 +522,15 @@ mod tests {
 
     #[test]
     fn launch_sets_cli_auth_source_and_control_secret() {
-        let cmd = build_backend_command(&test_bundle(), "127.0.0.1", 11115, false, "feedc0de");
+        let cmd = build_backend_command(
+            &test_bundle(),
+            "127.0.0.1",
+            11115,
+            false,
+            "feedc0de",
+            "launch-id",
+            Some(Path::new("/tmp/backend.pid.json")),
+        );
         assert_eq!(
             env_of(&cmd, "MAGELAB_BACKEND_AUTH_SOURCE").as_deref(),
             Some("cli")
@@ -462,11 +544,27 @@ mod tests {
             "headless backend must receive the exact mage helper path for auth refresh"
         );
         assert_eq!(env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED"), None);
+        assert_eq!(
+            env_of(&cmd, "MAGELAB_BACKEND_INSTANCE_ID").as_deref(),
+            Some("launch-id")
+        );
+        assert_eq!(
+            env_of(&cmd, "MAGELAB_BACKEND_PID_PATH").as_deref(),
+            Some("/tmp/backend.pid.json")
+        );
     }
 
     #[test]
     fn launch_sets_relay_env_when_enabled() {
-        let cmd = build_backend_command(&test_bundle(), "127.0.0.1", 11115, true, "feedc0de");
+        let cmd = build_backend_command(
+            &test_bundle(),
+            "127.0.0.1",
+            11115,
+            true,
+            "feedc0de",
+            "launch-id",
+            None,
+        );
         assert_eq!(
             env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED").as_deref(),
             Some("1")

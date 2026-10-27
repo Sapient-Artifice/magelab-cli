@@ -1,6 +1,7 @@
 pub mod account;
 pub mod analytics;
 pub mod auth;
+pub mod backend_pid;
 pub mod client;
 pub mod config;
 pub mod connect;
@@ -9,5 +10,6 @@ pub mod headless_commands;
 pub mod managed_commands;
 pub mod settings;
 pub mod setup_pi;
+pub mod skills;
 pub mod ui;
 pub mod vault;

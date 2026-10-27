@@ -280,3 +280,49 @@ async fn test_wait_for_backend_timeout() {
         .to_string()
         .contains("did not become healthy"));
 }
+
+#[tokio::test]
+async fn test_owned_backend_wait_requires_matching_instance() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "ok", "pid": 42, "started_at": 10.25,
+            "instance_id": "actual-instance", "version": "0.13.2"
+        })))
+        .mount(&server)
+        .await;
+    detect::wait_for_backend_instance(
+        &server.uri(),
+        "actual-instance",
+        std::time::Duration::from_secs(1),
+    )
+    .await
+    .unwrap();
+    let error = detect::wait_for_backend_instance(
+        &server.uri(),
+        "other-instance",
+        std::time::Duration::from_secs(1),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("different backend"));
+}
+
+#[tokio::test]
+async fn test_legacy_health_is_not_a_verified_process_identity() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+        .mount(&server)
+        .await;
+    assert!(detect::backend_identity(&server.uri()).await.is_none());
+    assert!(detect::wait_for_backend_instance(
+        &server.uri(),
+        "owned-instance",
+        std::time::Duration::from_millis(20)
+    )
+    .await
+    .is_err());
+}

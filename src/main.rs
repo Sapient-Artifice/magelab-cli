@@ -1,6 +1,7 @@
 mod account;
 mod analytics;
 mod auth;
+mod backend_pid;
 mod client;
 mod config;
 mod connect;
@@ -9,12 +10,13 @@ mod headless_commands;
 mod managed_commands;
 mod settings;
 mod setup_pi;
+mod skills;
 mod ui;
 mod vault;
 use anyhow::Result;
+use backend_pid::BackendPidFile;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -109,7 +111,7 @@ enum Commands {
     },
     /// Stop the headless backend launched by mage
     Stop {
-        /// Force kill if the backend is unhealthy or does not exit after terminate
+        /// Force kill a backend after verifying its live process identity
         #[arg(long)]
         force: bool,
     },
@@ -366,13 +368,6 @@ enum VaultAction {
         /// Secret key name (e.g., llm_api_key, magelab_api_key)
         key: String,
     },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct BackendPidFile {
-    pid: u32,
-    url: String,
-    started_at: u64,
 }
 
 impl VaultAction {
@@ -887,34 +882,58 @@ async fn cmd_launch(
         );
     }
 
+    let pid_path = backend_pid_path()?;
+    ensure_backend_launch_available(&pid_path, &wait_url).await?;
+    let pending = BackendPidFile {
+        pid: 0,
+        url: wait_url.clone(),
+        started_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64(),
+        instance_id: Some(detect::generate_backend_control_secret()),
+        version: None,
+    };
+    // Publish before spawning. Only the backend upgrades this advisory record
+    // with its actual process identity, avoiding a late launcher overwrite.
+    backend_pid::write_pending(&pid_path, &pending)?;
+    let instance_id = pending.instance_id.as_deref().unwrap();
     let control_secret = detect::generate_backend_control_secret();
-    let mut child = detect::launch_backend_headless(
+    let mut child = match detect::launch_backend_headless_owned(
         &bundle,
         host,
         port,
         config.relay_enabled,
         &control_secret,
-    )?;
-    let pid = child.id();
+        instance_id,
+        Some(&pid_path),
+    ) {
+        Ok(child) => child,
+        Err(error) => {
+            backend_pid::remove_owned(&pid_path, &pending).ok();
+            return Err(error);
+        }
+    };
 
     if wait {
         let sp = ui::spinner("Starting backend...");
-        if let Err(e) =
-            detect::wait_for_backend(&wait_url, std::time::Duration::from_secs(30)).await
+        if let Err(error) = detect::wait_for_backend_instance(
+            &wait_url,
+            instance_id,
+            std::time::Duration::from_secs(30),
+        )
+        .await
         {
             child.kill().ok();
             child.wait().ok();
-            return Err(e);
+            backend_pid::remove_owned(&pid_path, &pending).ok();
+            return Err(error);
         }
-        // Detach the child so it outlives this CLI invocation after health succeeds.
         std::mem::forget(child);
-        write_backend_pid(pid, &wait_url)?;
         sp.finish_and_clear();
         ui::success(&format!("Backend ready at {}", wait_url));
     } else {
-        // Fire-and-forget launch intentionally detaches immediately.
         std::mem::forget(child);
-        write_backend_pid(pid, &wait_url)?;
         ui::success("Backend launched");
         ui::label("check", "mage status");
     }
@@ -940,41 +959,45 @@ async fn cmd_stop(config: &Config, force: bool) -> Result<()> {
         return Ok(());
     };
 
-    if !process_is_running(pid_file.pid) {
-        remove_backend_pid().ok();
+    // A different backend may now occupy this URL. An exited recorded
+    // process is stale independently of whatever answers its old port.
+    if backend_pid::prune_exited(&backend_pid_path()?, &pid_file, process_is_running)? {
         println!(
             "Removed stale backend PID file for exited process {}.",
             pid_file.pid
         );
         return Ok(());
     }
-
-    if !force && !detect::check_backend_health(&pid_file.url).await {
+    let identity = detect::backend_identity(&pid_file.url).await;
+    let pid = if let Some(identity) = identity {
+        pid_file.verify(&identity)?
+    } else {
         anyhow::bail!(
-            "PID {} is recorded for {}, but the backend health check failed. Re-run with `mage stop --force` to terminate it anyway.",
-            pid_file.pid,
+            "Cannot verify the recorded backend at {}. It may still be starting or be unresponsive. Check the process manually; --force does not bypass process identity checks.",
             pid_file.url
         );
-    }
+    };
 
-    terminate_process(pid_file.pid, force)?;
+    terminate_process(pid, force)?;
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while process_is_running(pid_file.pid) && std::time::Instant::now() < deadline {
+    while process_is_running(pid) && std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    if process_is_running(pid_file.pid) {
+    if process_is_running(pid) {
         if !force {
             anyhow::bail!(
                 "Backend process {} did not exit. Re-run with `mage stop --force`.",
-                pid_file.pid
+                pid
             );
         }
-        kill_process(pid_file.pid)?;
+        anyhow::bail!(
+            "Backend process {pid} is still present after forced termination; inspect it manually."
+        );
     }
 
-    remove_backend_pid().ok();
+    backend_pid::remove_owned(&backend_pid_path()?, &pid_file)?;
     ui::success(&format!("Stopped backend at {}", pid_file.url));
     Ok(())
 }
@@ -1000,39 +1023,29 @@ fn backend_pid_path() -> Result<PathBuf> {
     Ok(Config::dir()?.join("backend.pid.json"))
 }
 
-fn write_backend_pid(pid: u32, url: &str) -> Result<()> {
-    let path = backend_pid_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let started_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let data = BackendPidFile {
-        pid,
-        url: url.to_string(),
-        started_at,
-    };
-    std::fs::write(path, serde_json::to_string_pretty(&data)?)?;
-    Ok(())
-}
-
 fn read_backend_pid() -> Result<Option<BackendPidFile>> {
-    let path = backend_pid_path()?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    let contents = std::fs::read_to_string(&path)?;
-    let data = serde_json::from_str(&contents)?;
-    Ok(Some(data))
+    backend_pid::read(&backend_pid_path()?)
 }
 
-fn remove_backend_pid() -> Result<()> {
-    let path = backend_pid_path()?;
-    if path.exists() {
-        std::fs::remove_file(path)?;
+async fn ensure_backend_launch_available(path: &std::path::Path, url: &str) -> Result<()> {
+    if let Some(record) = backend_pid::read(path)? {
+        if let Some(live) = detect::backend_identity(&record.url).await {
+            record.verify(&live)?;
+            anyhow::bail!(
+                "A mage-launched backend is already running at {}. Use `mage stop` first.",
+                record.url
+            );
+        }
+        if record.pid > 1 && !process_is_running(record.pid) {
+            backend_pid::remove_owned(path, &record)?;
+        } else {
+            anyhow::bail!("An existing backend PID record could not be verified. Check the recorded process before launching another backend.");
+        }
     }
+    anyhow::ensure!(
+        !detect::check_backend_health(url).await,
+        "A backend is already responding at {url}; refusing to launch another instance."
+    );
     Ok(())
 }
 
