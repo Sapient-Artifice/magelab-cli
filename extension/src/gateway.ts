@@ -72,9 +72,24 @@ export function buildGatewayConfig(
     apiKey: apiKeyRef,
     compat: {
       supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
+      supportsReasoningEffort: true,
     },
-    models: models.map((id) => ({ id })),
+    // Advertise capabilities for every gateway model, including unknown/new IDs.
+    // Pi calls the disabled reasoning level "off"; the gateway expects "none".
+    models: models.map((id) => ({
+      id,
+      input: ["text", "image"],
+      reasoning: true,
+      thinkingLevelMap: {
+        off: "none",
+        minimal: null,
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+        max: null,
+      },
+    })),
   };
   return config;
 }

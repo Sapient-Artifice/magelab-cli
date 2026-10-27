@@ -292,6 +292,13 @@ pi
 
 `setup-pi` will install Pi (via pnpm/npm) if it's not already installed, embed the extension files into `~/.pi/agent/extensions/magelab-agent/`, and install dependencies. Pi auto-discovers extensions from this directory.
 
+The extension generates `~/.pi/agent/models.json` at startup. Every MageLab model,
+including fallback and newly discovered models, enables text and image input
+and reasoning efforts `none`, `low`, `medium`, `high`, and `xhigh`. Pi displays
+`none` as `off`. These capabilities are advertised for every model; the selected
+gateway model determines which inputs and efforts it can process. After updating
+the CLI, run `mage setup-pi` again and restart Pi to install the updated generator.
+
 ### Manual Setup
 
 If you prefer to link the extension from the repo source:

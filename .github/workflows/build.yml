@@ -21,6 +21,28 @@ env:
   MAGELAB_WORKSPACE_REV: 10518d6a21a9a2f56f20813913fde5cbfdb5d61e
 
 jobs:
+  extension:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - name: Validate the embedded Pi extension
+        working-directory: extension
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+
   build:
     timeout-minutes: 60
     strategy:

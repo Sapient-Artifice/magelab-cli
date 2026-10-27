@@ -8,6 +8,24 @@ import {
   buildGatewayConfig,
 } from "../src/gateway.js";
 
+function expectModelCapabilities(provider: any) {
+  expect(provider.compat.supportsReasoningEffort).toBe(true);
+  expect(provider.models.length).toBeGreaterThan(0);
+  for (const model of provider.models) {
+    expect(model.input).toEqual(["text", "image"]);
+    expect(model.reasoning).toBe(true);
+    expect(model.thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+      max: null,
+    });
+  }
+}
+
 // ──────────────────────────────────────────────────────────
 // gatewayApiKeyRef — pure: the request-time apiKey reference
 // ──────────────────────────────────────────────────────────
@@ -54,9 +72,10 @@ describe("buildGatewayConfig", () => {
     expect(config.providers.magelab.apiKey).toBe("!mage auth token");
     expect(config.providers.magelab.baseUrl).toBe("https://api.magelab.ai/v1");
     expect(config.providers.magelab.api).toBe("openai-completions");
-    expect(config.providers.magelab.models).toEqual([
-      { id: "claude-sonnet-4-6" },
+    expect(config.providers.magelab.models.map((model: any) => model.id)).toEqual([
+      "claude-sonnet-4-6",
     ]);
+    expectModelCapabilities(config.providers.magelab);
   });
 
   it("migrates a previously-embedded literal key to the reference form", () => {
@@ -149,6 +168,7 @@ describe("ensureGatewayProvider", () => {
     const key = config.providers.magelab.apiKey as string;
     expect(key).toBe("!/usr/local/bin/mage auth token");
     expect(config.providers.magelab.models.length).toBeGreaterThan(0);
+    expectModelCapabilities(config.providers.magelab);
   });
 
   it("never persists a literal token, even when one is available", async () => {
@@ -189,7 +209,18 @@ describe("ensureGatewayProvider", () => {
     expect(calledWith!.url).toBe("https://api.magelab.ai/v1/models");
     expect(calledWith!.auth).toBe("Bearer tok123");
     const config = JSON.parse(readFileSync(modelsPathFor(home), "utf-8"));
-    expect(config.providers.magelab.models).toEqual([{ id: "m-1" }, { id: "m-2" }]);
+    expect(config.providers.magelab.models.map((model: any) => model.id)).toEqual(["m-1", "m-2"]);
+    expectModelCapabilities(config.providers.magelab);
+    // Startup regenerates this provider: capabilities must survive a second run.
+    await ensureGatewayProvider({
+      home,
+      mageBin: "/usr/local/bin/mage",
+      getToken: async () => "tok123",
+      fetchImpl: async () => new Response(JSON.stringify({ data: [{ id: "m-1" }, { id: "new-model" }] })),
+    });
+    const regenerated = JSON.parse(readFileSync(modelsPathFor(home), "utf-8"));
+    expect(regenerated.providers.magelab.models.map((model: any) => model.id)).toEqual(["m-1", "new-model"]);
+    expectModelCapabilities(regenerated.providers.magelab);
   });
 
   it("migrates an existing literal API key to the reference form", async () => {

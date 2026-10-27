@@ -46,12 +46,12 @@ is set, so keep this variable enabled for automated release validation.
 
 ```sh
 python -m unittest discover -s magelab-cli/scripts -p 'test_*.py' -v
-python magelab-cli/scripts/verify_release.py --expected-tag v0.1.13
+python magelab-cli/scripts/verify_release.py --expected-tag v0.1.14
 cargo fmt --check -p magelab-cli
 cargo clippy --locked -p magelab-cli -- -D warnings
 MAGELAB_SKIP_KEYCHAIN_TESTS=1 cargo test --locked --workspace
 cargo build --locked --release -p magelab-cli
-python magelab-cli/scripts/verify_release.py --expected-tag v0.1.13 --binary target/release/mage
+python magelab-cli/scripts/verify_release.py --expected-tag v0.1.14 --binary target/release/mage
 ```
 
 On Windows the executable is `target/release/mage.exe`. Set environment
@@ -63,6 +63,9 @@ output to agree. It then checks all twelve commands required by the desktop:
 `ask`, `internal auth-token`, and `internal vault-secrets`. These bounded
 `--help` probes exercise the parsers without accessing credentials or a backend.
 The Rust suite separately exercises command behavior against mock services.
+
+The shared build workflow also installs the locked Pi extension dependencies,
+type-checks the extension, and runs its full test suite before publication.
 
 ## Platform gates and publication
 
