@@ -10,10 +10,15 @@ The installed binary is `mage`.
 
 ## Building
 
+This crate belongs to the `Sapient-Artifice/magelab` Cargo workspace and requires
+its sibling `crates/magelab-core`. Run these commands from that workspace; a
+standalone checkout cannot resolve the inherited workspace dependencies. For
+pinned release builds and validation, see [Releasing](docs/releasing.md).
+
 ```bash
-cargo build                    # Debug build
-cargo build --release          # Release build
-cargo install --path .         # Install `mage` binary to ~/.cargo/bin
+cargo build -p magelab-cli           # Debug build
+cargo build --release -p magelab-cli # Release build
+cargo install --path magelab-cli    # Install `mage` binary to ~/.cargo/bin
 ```
 
 ## Running
@@ -67,6 +72,7 @@ mage keys revoke <id>          # Revoke an API key
 # Configuration
 mage config                    # Show current config and file path
 mage config set <key> <val>    # Set a config value
+mage --config ./cli.toml config # Read a specific existing CLI config file
 
 # Headless sessions and assistant turns (Mage v0.12.0+)
 mage sessions list --json
@@ -78,6 +84,36 @@ mage ask "Fetch deal 2" --session 42 --chat 91 --jsonl
 mage storage health --json
 mage protocol capabilities --json
 ```
+
+## Managed skills and MCP installation policy (Mage v0.13.0+)
+
+```bash
+mage skills add owner/repository --preview --json
+mage skills add owner/repository --skill skill-name --yes
+mage skills add owner/repository --project --session 42 --yes
+mage skills list --json
+mage skills update SOURCE_ID --preview --json
+mage skills update SOURCE_ID --yes
+mage skills remove SOURCE_ID --yes
+mage mcp approve server-name --session 42 --json
+mage mcp revoke server-name --session 42 --json
+mage mcp policy server-name deny --json
+```
+
+These commands use the running backend at `local_url`, or the explicit `--url`
+override, without launching a backend or falling back to a gateway or relay.
+Local source paths refer to the backend machine; relative paths resolve from the
+backend working directory. Use absolute paths when the CLI and backend start in
+different directories. Set `MAGELAB_REMOTE_ACCESS_TOKEN` if that backend requires
+bearer authentication.
+`--session` binds requests to the session owner; project skills require it.
+Skill previews can be inspected without applying them; use `--yes` to explicitly
+approve changes in noninteractive scripts. Updates preserve the backend's
+selected skill set unless `--skill` selects another set.
+
+MCP `approve` sets installation policy to `allow`; `revoke` restores `prompt`.
+`policy ... deny` blocks installation. Installation permission does not change
+MCP trust, model locality, account authorization, or tool permissions.
 
 ## Login, Launch, and Connect
 
@@ -286,6 +322,12 @@ On Pi startup, the extension calls `mage connect --json --no-launch` to find an 
 ## Configuration
 
 Config file: `~/.config/magelab/cli.toml`
+
+Use the global `--config PATH` option to read and save CLI settings in another
+existing TOML file, for example `mage --config ./cli.toml config set local_url
+http://127.0.0.1:11115`. A missing or malformed explicitly selected file is an
+error. This option only selects CLI settings; authentication credentials, vault
+storage and backend configuration keep their own locations.
 
 ```toml
 gateway_url = "https://api.magelab.ai"

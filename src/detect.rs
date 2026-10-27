@@ -241,11 +241,12 @@ fn dev_layout_candidates() -> Vec<PathBuf> {
 
 fn platform_default_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    let home = dirs::home_dir();
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let user_home = dirs::home_dir();
 
     #[cfg(target_os = "macos")]
     {
-        if let Some(h) = &home {
+        if let Some(h) = &user_home {
             paths.push(h.join("Applications").join("Mage Lab"));
             paths.push(h.join("Applications").join("magelab.app"));
         }
@@ -255,7 +256,7 @@ fn platform_default_paths() -> Vec<PathBuf> {
 
     #[cfg(target_os = "linux")]
     {
-        if let Some(h) = &home {
+        if let Some(h) = &user_home {
             paths.push(h.join(".local/share/magelab"));
         }
         paths.push(PathBuf::from("/opt/magelab"));
