@@ -296,7 +296,7 @@ pi
 #    "use search_web to find Rust async patterns"
 ```
 
-`setup-pi` will install Pi (via pnpm/npm) if it's not already installed, embed the extension files into `~/.pi/agent/extensions/magelab-agent/`, and install dependencies. Pi auto-discovers extensions from this directory.
+`setup-pi` will install Pi (via pnpm/npm) if it's not already installed, embed the extension files into `~/.pi/agent/extensions/magelab-agent/`, and install its runtime dependencies. The packaged extension excludes development dependencies and repository scripts. Pi auto-discovers extensions from this directory. `mage setup-pi --dev` links the repository's extension directory; install its development dependencies in the repository as shown below.
 
 The extension generates `~/.pi/agent/models.json` at startup. Every MageLab model,
 including fallback and newly discovered models, enables text and image input

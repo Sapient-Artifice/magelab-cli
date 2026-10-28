@@ -1,5 +1,5 @@
-use anyhow::Result;
-use std::path::PathBuf;
+use anyhow::{Context, Result};
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::detect;
@@ -25,8 +25,6 @@ const EXT_CLIENT_COORDINATOR_TS: &str = include_str!("../extension/src/client/co
 fn command_path(name: &str) -> PathBuf {
     #[cfg(windows)]
     {
-        use std::path::Path;
-
         let path = Path::new(name);
         if path.extension().is_some() {
             return PathBuf::from(name);
@@ -66,18 +64,74 @@ fn command_succeeds(name: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+fn runtime_package_json() -> Result<String> {
+    let mut manifest: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(EXT_PACKAGE_JSON)?;
+    manifest.remove("devDependencies");
+    manifest.remove("scripts");
+    Ok(format!("{}\n", serde_json::to_string_pretty(&manifest)?))
+}
+
+fn install_packages(manager: &str, args: &[&str], directory: Option<&Path>) -> Result<()> {
+    let mut command = std::process::Command::new(command_path(manager));
+    command.args(args);
+    if let Some(directory) = directory {
+        command.current_dir(directory);
+    }
+    // Drain stderr while waiting: package managers can exceed a pipe's buffer
+    // even when their installation fails before downloading anything.
+    let output = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .with_context(|| format!("Could not start {manager}"))?;
+    if !output.status.success() {
+        let tail = &output.stderr[output.stderr.len().saturating_sub(4096)..];
+        anyhow::bail!(
+            "{manager} exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(tail).trim()
+        );
+    }
+    Ok(())
+}
+
+fn remove_extension(path: &Path) -> std::io::Result<bool> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileTypeExt;
+            // Windows directory links require RemoveDirectory, including
+            // dangling links. Never follow the link into a development repo.
+            if metadata.file_type().is_symlink_dir() {
+                std::fs::remove_dir(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
+        }
+        #[cfg(not(windows))]
+        std::fs::remove_file(path)?;
+    } else if metadata.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(true)
+}
+
 pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     let home =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let ext_dir = home.join(".pi/agent/extensions/magelab-agent");
 
     if uninstall {
-        if ext_dir.exists() || ext_dir.is_symlink() {
-            if ext_dir.is_symlink() {
-                std::fs::remove_file(&ext_dir)?;
-            } else {
-                std::fs::remove_dir_all(&ext_dir)?;
-            }
+        if remove_extension(&ext_dir)? {
             ui::success("Removed Pi extension");
             ui::label("path", &ext_dir.display().to_string());
         } else {
@@ -123,32 +177,24 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         }
 
         let sp = ui::spinner("Installing Pi coding agent...");
-        let pi_ok = std::process::Command::new(command_path(pkg_mgr))
-            .args(["install", "-g", "@mariozechner/pi-coding-agent"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let pi_result = install_packages(
+            pkg_mgr,
+            &["install", "-g", "@mariozechner/pi-coding-agent"],
+            None,
+        );
 
         sp.finish_and_clear();
 
-        if !pi_ok {
+        if let Err(error) = pi_result {
             anyhow::bail!(
-                "Failed to install Pi. Try manually:\n  {pkg_mgr} install -g @mariozechner/pi-coding-agent"
+                "Failed to install Pi: {error:#}\nTry manually:\n  {pkg_mgr} install -g @mariozechner/pi-coding-agent"
             );
         }
         ui::success("Pi coding agent installed");
     }
 
     // Remove existing install (file or symlink) before reinstalling
-    if ext_dir.exists() || ext_dir.is_symlink() {
-        if ext_dir.is_symlink() {
-            std::fs::remove_file(&ext_dir)?;
-        } else {
-            std::fs::remove_dir_all(&ext_dir)?;
-        }
-    }
+    remove_extension(&ext_dir)?;
 
     if dev {
         // Dev mode: symlink to the repo's extension/ directory
@@ -185,7 +231,7 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::create_dir_all(&client_dir)?;
 
         // Write embedded files
-        std::fs::write(ext_dir.join("package.json"), EXT_PACKAGE_JSON)?;
+        std::fs::write(ext_dir.join("package.json"), runtime_package_json()?)?;
         std::fs::write(ext_dir.join("tsconfig.json"), EXT_TSCONFIG)?;
         std::fs::write(src_dir.join("index.ts"), EXT_INDEX_TS)?;
         std::fs::write(src_dir.join("binary.ts"), EXT_BINARY_TS)?;
@@ -196,7 +242,6 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         std::fs::write(src_dir.join("commands.ts"), EXT_COMMANDS_TS)?;
         std::fs::write(src_dir.join("validation.ts"), EXT_VALIDATION_TS)?;
         std::fs::write(src_dir.join("protocol.ts"), EXT_PROTOCOL_TS)?;
-        std::fs::write(src_dir.join("binary.ts"), EXT_BINARY_TS)?;
         std::fs::write(client_dir.join("index.ts"), EXT_CLIENT_INDEX_TS)?;
         std::fs::write(client_dir.join("errors.ts"), EXT_CLIENT_ERRORS_TS)?;
         std::fs::write(client_dir.join("coordinator.ts"), EXT_CLIENT_COORDINATOR_TS)?;
@@ -204,35 +249,24 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
         sp.set_message("Installing dependencies...");
 
         // Try pnpm first, fall back to npm
-        let install_result = std::process::Command::new("pnpm")
-            .arg("install")
-            .current_dir(&ext_dir)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .status();
-
-        let ok = match install_result {
-            Ok(s) if s.success() => true,
-            _ => {
-                // Fall back to npm
-                std::process::Command::new("npm")
-                    .arg("install")
-                    .current_dir(&ext_dir)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            }
+        let install_result = match install_packages("pnpm", &["install", "--prod"], Some(&ext_dir))
+        {
+            Ok(()) => Ok(()),
+            Err(pnpm_error) => install_packages(
+                "npm",
+                &["install", "--omit=dev", "--no-audit", "--no-fund"],
+                Some(&ext_dir),
+            )
+            .with_context(|| format!("pnpm installation failed: {pnpm_error:#}")),
         };
 
         sp.finish_and_clear();
 
-        if !ok {
+        if let Err(error) = install_result {
             anyhow::bail!(
-                "Failed to install dependencies. Ensure pnpm or npm is available.\n\
+                "Failed to install runtime dependencies: {error:#}\n\
                  Extension files written to: {}\n\
-                 Run manually: cd {} && pnpm install",
+                 Run manually: cd {} && npm install --omit=dev --no-audit --no-fund",
                 ext_dir.display(),
                 ext_dir.display()
             );
@@ -269,4 +303,48 @@ pub fn cmd_setup_pi(uninstall: bool, dev: bool) -> Result<()> {
     println!();
 
     Ok(())
+}
+
+#[cfg(all(test, any(unix, windows)))]
+mod tests {
+    use super::remove_extension;
+    use std::fs;
+    use std::path::Path;
+
+    fn directory_link(source: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(source, link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(source, link).unwrap();
+    }
+
+    #[test]
+    fn removing_development_link_preserves_source_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let link = temp.path().join("installed");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("package.json"), "source manifest").unwrap();
+        directory_link(&source, &link);
+        assert!(remove_extension(&link).unwrap());
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(
+            fs::read_to_string(source.join("package.json")).unwrap(),
+            "source manifest"
+        );
+        assert!(!remove_extension(&link).unwrap());
+    }
+
+    #[test]
+    fn removing_dangling_development_link_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let link = temp.path().join("installed");
+        fs::create_dir(&source).unwrap();
+        directory_link(&source, &link);
+        fs::remove_dir(&source).unwrap();
+        assert!(remove_extension(&link).unwrap());
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(!source.exists());
+    }
 }
