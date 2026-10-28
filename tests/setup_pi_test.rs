@@ -189,11 +189,12 @@ fn test_setup_pi_embeds_reusable_client_modules() {
         "pnpm install --prod\n"
     );
     let extension = tmp.path().join(".pi/agent/extensions/magelab-agent");
+    let recorded_directory = fs::read_to_string(tmp.path().join("install-cwd")).unwrap();
     assert_eq!(
-        fs::read_to_string(tmp.path().join("install-cwd"))
-            .unwrap()
-            .trim(),
-        extension.to_str().unwrap()
+        std::path::Path::new(recorded_directory.trim())
+            .canonicalize()
+            .unwrap(),
+        extension.canonicalize().unwrap()
     );
     assert_runtime_manifest(tmp.path());
 
@@ -324,7 +325,10 @@ fn test_setup_pi_dev_links_original_manifest_without_installing_packages() {
         .assert()
         .success();
     let extension = tmp.path().join(".pi/agent/extensions/magelab-agent");
-    assert_eq!(fs::read_link(&extension).unwrap(), source);
+    assert_eq!(
+        fs::read_link(&extension).unwrap().canonicalize().unwrap(),
+        source.canonicalize().unwrap()
+    );
     assert!(installed_manifest(tmp.path())
         .get("devDependencies")
         .is_some());
