@@ -1108,18 +1108,6 @@ fn kill_process(pid: u32) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn kill_process(pid: u32) -> Result<()> {
-    let status = Command::new("taskkill")
-        .args(windows_taskkill_args(pid))
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!("Failed to kill backend process {}", pid)
-    }
-}
-
-#[cfg(windows)]
 fn windows_taskkill_args(pid: u32) -> [String; 4] {
     ["/PID".into(), pid.to_string(), "/T".into(), "/F".into()]
 }
