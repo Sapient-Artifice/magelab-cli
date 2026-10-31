@@ -36,7 +36,7 @@ class ReleaseVerificationTests(unittest.TestCase):
             *[subprocess.CompletedProcess([], 0, "Usage: mage command\n", "") for _ in REQUIRED_COMMANDS],
         ])
         verify_binary(self.binary, "0.1.13", run)
-        self.assertEqual(run.call_count, 13)
+        self.assertEqual(run.call_count, len(REQUIRED_COMMANDS) + 1)
         self.assertEqual(
             [call.args[0][1:] for call in run.call_args_list],
             [["--version"], *[[*command, "--help"] for command in REQUIRED_COMMANDS]],
@@ -52,6 +52,17 @@ class ReleaseVerificationTests(unittest.TestCase):
         ])
         with self.assertRaises(subprocess.CalledProcessError):
             verify_binary(self.binary, "0.1.13", run)
+
+    def test_missing_sandbox_setup_command_blocks_release(self):
+        def run(command, **_kwargs):
+            arguments = command[1:]
+            if arguments == ["setup", "sandbox", "--help"]:
+                raise subprocess.CalledProcessError(2, command)
+            output = "mage 0.1.18\n" if arguments == ["--version"] else "Usage: mage command\n"
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            verify_binary(self.binary, "0.1.18", run)
 
     def test_missing_help_or_hanging_command_blocks_release(self):
         for result in (

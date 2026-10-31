@@ -21,6 +21,7 @@ REQUIRED_COMMANDS = (
     ("ask",),
     ("internal", "auth-token"),
     ("internal", "vault-secrets"),
+    ("setup", "sandbox"),
 )
 
 
