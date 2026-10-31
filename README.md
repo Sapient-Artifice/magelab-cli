@@ -53,6 +53,11 @@ mage launch --host 0.0.0.0 --allow-network
 mage launch --port 8787        # Override local_url port for this launch
 mage status                    # Show backend health and auth info
 
+# Optional Linux sandbox support
+mage setup sandbox             # Review and install dependencies on this machine
+mage setup sandbox --check     # Verify installed support without installing
+mage setup sandbox --dry-run   # Show the installation plan without changes
+
 # Device management
 mage devices                   # List online relay devices
 mage devices --json            # Output as JSON
@@ -84,6 +89,28 @@ mage ask "Fetch deal 2" --session 42 --chat 91 --jsonl
 mage storage health --json
 mage protocol capabilities --json
 ```
+
+## Optional Linux sandbox setup
+
+`mage setup sandbox` prepares the local machine for opt-in sandboxed sessions
+on Ubuntu or Arch Linux. It requires a compatible installed Mage Lab backend
+containing the sandbox setup helper. Older backends fail with an upgrade message;
+macOS and Windows are explicitly unsupported for sandbox setup.
+
+Run this command as the user who runs Mage Lab. The backend's versioned helper
+shows the installation plan and asks before applying it. Only system package
+installation uses `sudo`; the CLI and Python helper run as the current user.
+Use `--yes` to accept the plan in an unattended installation, `--check` to verify
+installed dependencies and confinement, or `--dry-run` to inspect the plan.
+These modes cannot be combined. A failed dependency check or confinement probe
+returns a nonzero exit status through the CLI.
+
+Setup uses the same local bundle discovery as `mage launch`, including
+`MAGELAB_API_DIR`, `MAGELAB_HOME`, and the `magelab_home` configuration setting.
+It does not require login, launch a backend, or connect to the configured backend
+URL, gateway, or relay. Run it on the server that will host sandboxed sessions.
+Installing support does not enable sandboxing for existing or new sessions;
+clients still explicitly request `sandbox: true` when creating a session.
 
 ## Managed skills and MCP installation policy (Mage v0.13.0+)
 

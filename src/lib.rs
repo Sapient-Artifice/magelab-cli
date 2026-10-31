@@ -10,5 +10,6 @@ pub mod headless_commands;
 pub mod managed_commands;
 pub mod settings;
 pub mod setup_pi;
+pub mod setup_sandbox;
 pub mod ui;
 pub mod vault;

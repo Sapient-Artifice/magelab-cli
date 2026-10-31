@@ -10,6 +10,7 @@ mod headless_commands;
 mod managed_commands;
 mod settings;
 mod setup_pi;
+mod setup_sandbox;
 mod ui;
 mod vault;
 use anyhow::Result;
@@ -226,6 +227,11 @@ enum Commands {
         #[arg(long)]
         dev: bool,
     },
+    /// Set up optional capabilities on this machine
+    Setup {
+        #[command(subcommand)]
+        action: setup_sandbox::SetupCommand,
+    },
     /// Print version
     Version,
 }
@@ -381,12 +387,20 @@ impl VaultAction {
 async fn main() {
     if let Err(error) = run().await {
         eprintln!("Error: {error:#}");
-        std::process::exit(headless_commands::process_exit_code(&error).unwrap_or(1));
+        std::process::exit(
+            setup_sandbox::process_exit_code(&error)
+                .or_else(|| headless_commands::process_exit_code(&error))
+                .unwrap_or(1),
+        );
     }
 }
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    let local_setup = matches!(&cli.command, Commands::Setup { .. });
+    if local_setup {
+        setup_sandbox::require_supported_platform()?;
+    }
     let mut config = match cli.config {
         Some(path) => {
             let mut config = Config::load_from(&path)?;
@@ -396,12 +410,14 @@ async fn run() -> Result<()> {
         None => Config::load().unwrap_or_default(),
     };
 
-    if config.telemetry() {
+    if !local_setup && config.telemetry() {
         analytics::init().await;
     }
 
-    // Set Touch ID disable flag before any command dispatch
-    auth::touchid::set_disabled(cli.no_touchid);
+    // Local installation needs neither authentication nor telemetry startup.
+    if !local_setup {
+        auth::touchid::set_disabled(cli.no_touchid);
+    }
 
     match cli.command {
         Commands::Login { method, status } => {
@@ -605,6 +621,7 @@ async fn run() -> Result<()> {
             Ok(())
         }
         Commands::SetupPi { uninstall, dev } => setup_pi::cmd_setup_pi(uninstall, dev),
+        Commands::Setup { action } => setup_sandbox::run(&config, &action),
         Commands::Version => {
             println!("mage {}", env!("CARGO_PKG_VERSION"));
             Ok(())
