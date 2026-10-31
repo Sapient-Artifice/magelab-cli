@@ -85,6 +85,7 @@ fn run_supported(config: &Config, command: &SetupCommand) -> Result<()> {
     let mut process = Command::new(&python);
     process
         .arg("-I")
+        .arg("-B")
         .arg(&helper)
         .current_dir(&backend_dir)
         .stdin(Stdio::inherit())

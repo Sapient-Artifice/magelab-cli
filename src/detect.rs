@@ -408,6 +408,10 @@ fn build_backend_command(
     let backend_arg = bundle.backend_dir.to_string_lossy().to_string();
     let port_arg = port.to_string();
     let mut cmd = Command::new(&bundle.python);
+    if bundle.kind == BackendBundleKind::PackagedApp {
+        // Installed source must stay unchanged, including when it is writable.
+        cmd.arg("-B");
+    }
     cmd.args([
         "-m",
         "uvicorn",
@@ -569,6 +573,61 @@ mod tests {
             env_of(&cmd, "REALTIME_DESKTOP_BROKER_ENABLED").as_deref(),
             Some("1")
         );
+    }
+
+    #[test]
+    fn packaged_launch_imports_backend_without_writing_bytecode() {
+        for kind in [BackendBundleKind::DevRepo, BackendBundleKind::PackagedApp] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let backend = temp.path().join("backend");
+            std::fs::create_dir(&backend).unwrap();
+            // A uvicorn stand-in exercises the real interpreter and launch argv
+            // without requiring the backend's third-party dependencies in CI.
+            std::fs::write(backend.join("uvicorn.py"), "import main\n").unwrap();
+            std::fs::write(
+                backend.join("main.py"),
+                "import backend_module\nassert backend_module.VALUE == 42\nprint('backend imported')\n",
+            )
+            .unwrap();
+            std::fs::write(backend.join("backend_module.py"), "VALUE = 42\n").unwrap();
+            let packaged = kind == BackendBundleKind::PackagedApp;
+            let bundle = BackendBundle {
+                kind,
+                root: temp.path().to_owned(),
+                api_dir: None,
+                backend_dir: backend.clone(),
+                python: PathBuf::from(if cfg!(windows) { "python" } else { "python3" }),
+            };
+            let output = build_backend_command(
+                &bundle,
+                "127.0.0.1",
+                11115,
+                false,
+                "test-secret",
+                "test-instance",
+                None,
+            )
+            .env_remove("PYTHONDONTWRITEBYTECODE")
+            .env_remove("PYTHONPYCACHEPREFIX")
+            .env_remove("PYTHONSAFEPATH")
+            .env_remove("PYTHONPATH")
+            .output()
+            .expect("Python is required for the backend launch regression test");
+            assert!(
+                output.status.success(),
+                "Python launch failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).trim(),
+                "backend imported"
+            );
+            assert_eq!(
+                backend.join("__pycache__").exists(),
+                !packaged,
+                "packaged launch must suppress caches; development keeps Python's default"
+            );
+        }
     }
 
     #[test]

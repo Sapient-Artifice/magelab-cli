@@ -133,7 +133,7 @@ printf 'helper stderr\n' >&2
                 .stderr(predicate::str::contains("helper stderr"));
             let actual = fs::read_to_string(&install.log).unwrap();
             let mut expected = format!(
-                "{}\n-I\n{}\n",
+                "{}\n-I\n-B\n{}\n",
                 install.api.join("backend").display(),
                 install.helper.display()
             );
@@ -144,6 +144,35 @@ printf 'helper stderr\n' >&2
             assert_eq!(actual, expected);
             install.assert_no_user_state();
         }
+    }
+
+    #[test]
+    fn helper_imports_backend_without_writing_bytecode() {
+        let python = std::process::Command::new("python3")
+            .args(["-I", "-B", "-c", "import sys; print(sys.executable)"])
+            .output()
+            .expect("Python is required for the sandbox setup regression test");
+        assert!(python.status.success());
+        let python = String::from_utf8(python.stdout).unwrap();
+        let install = Installation::new("exec \"$MAGE_TEST_PYTHON\" \"$@\"");
+        let backend = install.api.join("backend");
+        fs::write(backend.join("backend_module.py"), "VALUE = 42\n").unwrap();
+        fs::write(
+            &install.helper,
+            "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent.parent))\nimport backend_module\nassert backend_module.VALUE == 42\nprint('helper imported backend')\n",
+        )
+        .unwrap();
+        install
+            .command()
+            .arg("--check")
+            .env("MAGE_TEST_PYTHON", python.trim())
+            .env_remove("PYTHONDONTWRITEBYTECODE")
+            .env_remove("PYTHONPYCACHEPREFIX")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("helper imported backend"));
+        assert!(!backend.join("__pycache__").exists());
+        install.assert_no_user_state();
     }
 
     #[test]
@@ -171,7 +200,7 @@ printf 'helper stderr\n' >&2
         assert_eq!(
             actual,
             format!(
-                "{}\n-I\n{}\n--check\n",
+                "{}\n-I\n-B\n{}\n--check\n",
                 install.api.join("backend").display(),
                 install.helper.display()
             )
